@@ -9,6 +9,8 @@
     settings: C.Store.settings(),
     spot: null, lat: null, lon: null, gpsFix: null,
     wx: null, marine: null, tide: null, bom: null, bomTides: null,
+    live: null, liveRadar: null, obs: null, obsDelta: null, ens: null, spread: null, learned: null,
+    bomRadarId: null, bomFrameIx: 0, bomPlaying: false, bomTimer: null, radarSource: 'bom',
     series: [], windows: [], detail: null,
     tideDay: 0, mapMode: 'radar', base: 'map',
     radar: null, frames: [], frameIx: 0, playing: false, timer: null,
@@ -195,7 +197,10 @@
       C.Api.weather(S.lat, S.lon, S.settings.model).then(function (r) { S.wx = r.data; S.stale = r.stale; S.fellBack = !!r.fellBack; })
         .catch(function (e) { S.lastError = e; }),
       C.Api.local('bom.json').then(function (j) { S.bom = j; }).catch(function () {}),
-      C.Api.local('tides.json').then(function (j) { S.bomTides = j; }).catch(function () {})
+      C.Api.local('tides.json').then(function (j) { S.bomTides = j; }).catch(function () {}),
+      C.Api.live('obs.json').then(function (r) { S.live = r.data; }).catch(function () { S.live = null; }),
+      C.Api.live('radar.json', 3).then(function (r) { S.liveRadar = r.data; }).catch(function () { S.liveRadar = null; }),
+      C.Api.ensemble(S.lat, S.lon).then(function (r) { S.ens = r.data; }).catch(function () { S.ens = null; })
     ];
     if (sea) {
       jobs.push(C.Api.marine(sea.lat, sea.lon).then(function (r) { S.marine = r.data; }).catch(function () { S.marine = null; }));
@@ -207,6 +212,9 @@
       if (S.reload) { S.reload = false; load(true); return; }
       el('refreshBtn').classList.remove('spin');
       buildTide();
+      S.obs = C.Obs.nearest(S.live, S.lat, S.lon, 45);
+      S.obsDelta = S.wx && S.obs ? C.Obs.apply(S.wx, S.obs, 6) : null;
+      S.spread = C.Ensemble.spread(S.ens);
       if (!S.wx) {
         el('verdict').textContent = 'No forecast yet';
         el('verdictSub').textContent = 'Check your connection and hit refresh.';
@@ -234,12 +242,20 @@
     var picks = S.settings.species.map(function (n) {
       return D.SPECIES.filter(function (s) { return s.n === n; })[0];
     }).filter(Boolean);
+    S.learned = S.settings.learn ? C.Score.learn(C.Store.log()) : { ready: false, mult: {} };
+    var weights = {}, expert = S.settings.weights || {};
+    ['wind', 'pressure', 'light', 'solunar', 'tide', 'swell', 'cloud', 'sst'].forEach(function (k) {
+      weights[k] = (expert[k] != null ? expert[k] : 1) * (S.learned.mult[k] != null ? S.learned.mult[k] : 1);
+    });
     return {
       kinds: S.spot ? S.spot.kinds : ['e'],
+      faces: S.spot && !S.gpsFix ? S.spot.faces : (S.spot && S.gpsFix && S.gpsFix.km < 4 ? S.spot.faces : null),
       access: S.settings.access,
       windLimit: S.settings.windLimit,
       swellLimit: S.settings.swellLimit,
       species: picks,
+      weights: weights,
+      spread: S.spread,
       lat: S.lat, lon: S.lon
     };
   }
@@ -249,7 +265,8 @@
     var now = new Date();
     var sun = A.sunTimes(now, S.lat, S.lon, TZ);
     var sol = A.solunar(now, S.lat, S.lon, TZ);
-    var cc = { kinds: c.kinds, access: c.access, windLimit: c.windLimit, swellLimit: c.swellLimit, species: c.species, month: A.parts(now, TZ).month - 1 };
+    var cc = { kinds: c.kinds, faces: c.faces, weights: c.weights, access: c.access, windLimit: c.windLimit,
+               swellLimit: c.swellLimit, species: c.species, month: A.parts(now, TZ).month - 1 };
     S.detail = C.Score.at(Date.now(), S.wx, S.marine, S.tide, sun, sol.periods, cc);
     S.sun = sun; S.sol = sol;
     S.series = C.Score.series(S.wx, S.marine, S.tide, c, TZ);
@@ -352,7 +369,33 @@
     }
     el('nowGrid').innerHTML = cells.join('');
 
-    renderTideNow(); renderSunMoon(); renderWindows(); renderBomText();
+    renderStation(); renderTideNow(); renderSunMoon(); renderWindows(); renderBomText();
+  }
+
+  function renderStation() {
+    var card = el('stationCard'), o = S.obs;
+    if (!o) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    var d = S.obsDelta;
+    function delta(v, unit, dp) {
+      if (v == null || Math.abs(v) < (dp ? 0.15 : 0.5)) return '<span class="muted">matches model</span>';
+      var sign = v > 0 ? '+' : '−';
+      return '<span style="color:' + (Math.abs(v) > (unit === 'kt' ? 5 : 2) ? 'var(--poor)' : 'var(--ink2)') + '">' +
+        sign + (dp ? Math.abs(v).toFixed(1) : Math.round(Math.abs(v))) + ' ' + unit + ' vs model</span>';
+    }
+    el('stationBody').innerHTML =
+      '<div class="row"><div><div style="font-weight:680;font-size:16px">' + esc(o.name) + '</div>' +
+      '<div class="muted">' + o.km + ' km away · read ' + (o.ageMin != null ? o.ageMin + ' min ago' : 'recently') + '</div></div>' +
+      '<div class="chip">BOM station</div></div>' +
+      '<div class="grid" style="margin-top:10px">' +
+      '<div class="cell"><div class="k">Wind</div><div class="v">' + n0(o.windKt) + ' <small>kt</small> ' + arrow(o.windDir, 16) + '</div>' +
+      '<div class="x">' + (o.windDirText || C.degToCompass(o.windDir)) + (o.gustKt != null ? ' · gusts ' + n0(o.gustKt) : '') + '<br>' + (d ? delta(d.wind, 'kt') : '') + '</div></div>' +
+      '<div class="cell"><div class="k">Pressure</div><div class="v">' + n1(o.pressure) + '</div><div class="x">hPa<br>' + (d ? delta(d.pressure, 'hPa', true) : '') + '</div></div>' +
+      '<div class="cell"><div class="k">Air</div><div class="v">' + n1(o.temp) + '°</div><div class="x">' +
+      (o.rain != null ? o.rain + ' mm since 9am' : '&nbsp;') + '<br>' + (d ? delta(d.temp, '°', true) : '') + '</div></div>' +
+      '</div>' +
+      (d && (Math.abs(d.wind) >= 3 || Math.abs(d.pressure) >= 1.5) ?
+        '<div class="muted" style="margin-top:8px">The next six hours of the forecast have been nudged toward what the station is reading. The model gets the rest.</div>' : '');
   }
 
   function seaTempNote(sst) {
@@ -439,10 +482,12 @@
     var box = el('windows');
     if (!S.windows.length) { box.innerHTML = '<div class="empty">Nothing stands out in the next week. Best of a bad lot is still the dawn change.</div>'; return; }
     box.innerHTML = S.windows.slice(0, 5).map(function (w) {
+      var conf = C.Ensemble.label(w.sd);
       return '<div class="win"><div><div class="w1">' + relDay(w.start) + ' ' + t(w.start) + ' – ' + t(w.end) + '</div>' +
-        '<div class="w2">' + fDate.format(new Date(w.start)) + ' · ' + Math.round((w.end - w.start) / HOUR) + ' hour window</div></div>' +
+        '<div class="w2">' + fDate.format(new Date(w.start)) + ' · ' + Math.round((w.end - w.start) / HOUR) + ' hour window' +
+        (conf ? ' · <span style="color:' + toneColor(conf.tone) + '">' + conf.text.toLowerCase() + '</span>' : '') + '</div></div>' +
         '<div class="pill" style="background:' + scoreColor(w.peak) + '">' + w.peak + '</div></div>';
-    }).join('');
+    }).join('') + (S.spread ? '<div class="muted">Confidence comes from how tightly the ' + S.spread.members + ' members of BOM\u2019s ensemble agree on the wind.</div>' : '');
   }
 
   function renderBomText() {
@@ -461,7 +506,54 @@
   /* ================= FORECAST ======================================== */
 
   function renderForecast() {
-    renderScoreChart(); renderHourStrip(); renderDayList(); renderMarine();
+    renderTempChart(); renderScoreChart(); renderHourStrip(); renderDayList(); renderMarine();
+  }
+
+  function renderTempChart() {
+    var H = S.wx.hourly, T = H.time, V = H.temperature_2m, F = H.apparent_temperature;
+    if (!T || !V) { el('tempChart').innerHTML = ''; return; }
+    var w = 700, h = 210, padL = 30, padB = 26, now = Date.now();
+    var pts = [], fpts = [], min = 99, max = -99;
+    for (var i = 0; i < T.length; i++) {
+      var ts = T[i] * 1000; if (ts < now - 3 * HOUR || V[i] == null) continue;
+      pts.push([ts, V[i]]); min = Math.min(min, V[i]); max = Math.max(max, V[i]);
+      if (F && F[i] != null) fpts.push([ts, F[i]]);
+    }
+    if (pts.length < 3) { el('tempChart').innerHTML = ''; return; }
+    var lo = Math.floor(min / 2) * 2 - 2, hi = Math.ceil(max / 2) * 2 + 2;
+    var t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+    var X = function (x) { return padL + (x - t0) / (t1 - t0) * (w - padL - 8); };
+    var Y = function (v) { return 12 + (hi - v) / (hi - lo) * (h - padB - 20); };
+    var path = pts.map(function (p, i) { return (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1); }).join(' ');
+    var fpath = fpts.map(function (p, i) { return (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1); }).join(' ');
+    var grid = '', labels = '';
+    for (var v = lo; v <= hi; v += (hi - lo > 16 ? 4 : 2)) {
+      grid += '<line x1="' + padL + '" y1="' + Y(v).toFixed(1) + '" x2="' + (w - 8) + '" y2="' + Y(v).toFixed(1) + '" stroke="var(--line)" stroke-dasharray="2 4"/>' +
+        '<text x="2" y="' + (Y(v) + 4).toFixed(1) + '" font-size="10" fill="var(--ink3)">' + v + '°</text>';
+    }
+    var Dy = S.wx.daily, d0 = A.startOfLocalDay(new Date(t0), TZ).valueOf();
+    for (var k = 0; k < 8; k++) {
+      var ds = d0 + k * DAY;
+      if (ds > t0 && ds < t1) grid += '<line x1="' + X(ds).toFixed(1) + '" y1="10" x2="' + X(ds).toFixed(1) + '" y2="' + (h - padB) + '" stroke="var(--line)"/>';
+      if (ds + DAY > t0 && ds < t1) {
+        var mid = X(Math.max(t0, ds) + Math.min(DAY, Math.min(t1, ds + DAY) - Math.max(t0, ds)) / 2);
+        var di = -1; for (var q = 0; q < Dy.time.length; q++) if (Dy.time[q] * 1000 === ds) di = q;
+        labels += '<text x="' + mid.toFixed(1) + '" y="' + (h - 8) + '" font-size="10.5" fill="var(--ink3)" text-anchor="middle">' + dayName(ds) + '</text>';
+        if (di >= 0) {
+          labels += '<text x="' + mid.toFixed(1) + '" y="' + (Y(Dy.temperature_2m_max[di]) - 8).toFixed(1) + '" font-size="11" font-weight="700" fill="var(--accent2)" text-anchor="middle">' + n0(Dy.temperature_2m_max[di]) + '°</text>';
+          labels += '<text x="' + mid.toFixed(1) + '" y="' + (Y(Dy.temperature_2m_min[di]) + 15).toFixed(1) + '" font-size="11" font-weight="700" fill="var(--accent)" text-anchor="middle">' + n0(Dy.temperature_2m_min[di]) + '°</text>';
+        }
+      }
+    }
+    var nx = X(Math.max(t0, Math.min(t1, now)));
+    el('tempChart').innerHTML = '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:210px">' + grid +
+      '<path d="' + path + ' L' + X(t1).toFixed(1) + ' ' + (h - padB) + ' L' + X(t0).toFixed(1) + ' ' + (h - padB) + 'Z" fill="color-mix(in srgb,var(--accent2) 12%,transparent)"/>' +
+      (fpath ? '<path d="' + fpath + '" fill="none" stroke="var(--ink3)" stroke-width="1.4" stroke-dasharray="4 3"/>' : '') +
+      '<path d="' + path + '" fill="none" stroke="var(--accent2)" stroke-width="2.4" stroke-linejoin="round"/>' +
+      '<line x1="' + nx.toFixed(1) + '" y1="10" x2="' + nx.toFixed(1) + '" y2="' + (h - padB) + '" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 3"/>' +
+      labels + '</svg>';
+    var obs = S.obs && S.obs.temp != null ? ' · station reading ' + n1(S.obs.temp) + '° now' : '';
+    el('tempFoot').textContent = 'Air temperature at ' + (S.gpsFix ? 'your location' : S.spot.name) + ', hourly for seven days. Dashed line is feels-like.' + obs;
   }
 
   function renderScoreChart() {
@@ -549,7 +641,11 @@
       if (S.marine && S.marine.daily && S.marine.daily.wave_height_max) {
         for (var k = 0; k < S.marine.daily.time.length; k++) if (S.marine.daily.time[k] * 1000 === ts) swell = S.marine.daily.wave_height_max[k];
       }
-      out.push('<div class="day"><div><div class="dn">' + relDay(ts) + '</div><div class="dd">' + fDate.format(new Date(ts)) + '</div></div>' +
+      var sdDay = null, sdN = 0, sdSum = 0;
+      S.series.forEach(function (p) { if (p.t >= ts && p.t < ts + DAY && p.sd != null) { sdSum += p.sd; sdN++; } });
+      if (sdN) sdDay = C.Ensemble.label(sdSum / sdN);
+      out.push('<div class="day"><div><div class="dn">' + relDay(ts) + '</div><div class="dd">' + fDate.format(new Date(ts)) +
+        (sdDay ? '<br><span style="color:' + toneColor(sdDay.tone) + '">' + sdDay.text.split(' ')[0] + ' conf.</span>' : '') + '</div></div>' +
         '<div class="di">' + wx(Dy.weather_code[i])[1] + '</div>' +
         '<div><div class="dt">' + n0(Dy.temperature_2m_min[i]) + '° – ' + n0(Dy.temperature_2m_max[i]) + '°' +
         (Dy.precipitation_sum[i] > 0.2 ? ' · ' + n1(Dy.precipitation_sum[i]) + ' mm' : '') + '</div>' +
@@ -734,6 +830,14 @@
       S.base = b.dataset.b;
       buildMapLayers();
     });
+    el('radarSrc').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-rs]'); if (!b) return;
+      Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); });
+      S.radarSource = b.dataset.rs; showRadarSource();
+    });
+    el('bomPlay').addEventListener('click', function () { S.bomPlaying ? bomStop() : bomPlay(); });
+    el('bomScrub').addEventListener('input', function () { bomStop(); S.bomFrameIx = +this.value; bomShow(); });
+    el('bomRadarPick').addEventListener('change', function () { S.bomRadarId = this.value; bomBuild(); });
     el('playBtn').addEventListener('click', togglePlay);
     el('scrub').addEventListener('input', function () {
       stopPlay(); S.frameIx = +this.value; showFrame();
@@ -752,7 +856,84 @@
     if (f.getAttribute('data-src') !== u) { f.setAttribute('data-src', u); f.src = u; }
   }
 
+  function showRadarSource() {
+    var haveBom = !!(S.liveRadar && S.liveRadar.radars && Object.keys(S.liveRadar.radars).length);
+    if (!haveBom && S.radarSource === 'bom') S.radarSource = 'rv';
+    el('bomPane').style.display = S.radarSource === 'bom' ? '' : 'none';
+    el('rvPane').style.display = S.radarSource === 'rv' ? '' : 'none';
+    Array.prototype.forEach.call(el('radarSrc').children, function (x) { x.classList.toggle('on', x.dataset.rs === S.radarSource); });
+    el('radarSrc').children[0].disabled = !haveBom;
+    el('radarSrc').children[0].style.opacity = haveBom ? '' : '.4';
+    if (S.radarSource === 'bom') bomBuild();
+    else { if (S.map) S.map.render(); }
+  }
+
+  function bomBuild() {
+    var R = S.liveRadar; if (!R || !R.radars) return;
+    var ids = Object.keys(R.radars);
+    if (!S.bomRadarId || !R.radars[S.bomRadarId]) {
+      /* nearest radar to where he is */
+      var best = null, bd = 1e9;
+      ids.forEach(function (id) {
+        var m = D.RADARS[id]; if (!m) return;
+        var d = C.haversine(S.lat, S.lon, m.lat, m.lon);
+        if (d < bd) { bd = d; best = id; }
+      });
+      S.bomRadarId = best || ids[0];
+    }
+    el('bomRadarPick').innerHTML = ids.map(function (id) {
+      var m = D.RADARS[id];
+      return '<option value="' + id + '"' + (id === S.bomRadarId ? ' selected' : '') + '>' + esc(m ? m.name : id) + ' 128 km</option>';
+    }).join('');
+    var r = R.radars[S.bomRadarId], base = C.Api.liveBase();
+    var stage = el('bomStage');
+    var layers = ['background', 'topography', 'locations', 'range'].map(function (l) {
+      return r.layers && r.layers[l] ? '<img class="bl" src="' + base + r.layers[l] + '" alt="">' : '';
+    }).join('');
+    var frames = (r.frames || []).map(function (f, i) {
+      return '<img class="bf" data-i="' + i + '" src="' + base + f.file + '" alt="" style="opacity:0">';
+    }).join('');
+    /* he is here: BOM 128 km images are 512 px across 256 km, north up */
+    var dot = '';
+    var m = D.RADARS[S.bomRadarId];
+    if (m) {
+      var dy = (S.lat - m.lat) * 111.2, dx = (S.lon - m.lon) * 111.2 * Math.cos(m.lat * Math.PI / 180);
+      var px = 50 + dx / 256 * 100, py = 50 - dy / 256 * 100;
+      if (px > 2 && px < 98 && py > 2 && py < 98) dot = '<div class="bdot" style="left:' + px.toFixed(1) + '%;top:' + py.toFixed(1) + '%"></div>';
+    }
+    stage.innerHTML = layers + frames + dot +
+      (r.layers && r.layers.legend ? '<img class="blegend" src="' + base + r.layers.legend + '" alt="">' : '');
+    el('bomScrub').max = String(Math.max(0, (r.frames || []).length - 1));
+    S.bomFrameIx = Math.max(0, (r.frames || []).length - 1);
+    el('bomMeta').textContent = 'Bureau of Meteorology ' + (m ? m.name : S.bomRadarId) + ' radar · frames every ' +
+      (r.stepMin || 6) + ' min · pulled ' + (R.fetched ? Math.round((Date.now() - R.fetched * 1000) / 60000) + ' min ago' : 'recently') +
+      '. Refreshes every 10 minutes.';
+    bomShow(); bomPlay();
+  }
+
+  function bomShow() {
+    var r = S.liveRadar && S.liveRadar.radars[S.bomRadarId]; if (!r) return;
+    var imgs = el('bomStage').querySelectorAll('.bf');
+    Array.prototype.forEach.call(imgs, function (im, i) { im.style.opacity = i === S.bomFrameIx ? 1 : 0; });
+    el('bomScrub').value = String(S.bomFrameIx);
+    var f = r.frames[S.bomFrameIx];
+    el('bomTime').textContent = f ? t(f.time * 1000) : '—';
+  }
+  function bomPlay() {
+    S.bomPlaying = true; clearInterval(S.bomTimer);
+    el('bomPlay').innerHTML = '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor" stroke="none"/></svg>';
+    S.bomTimer = setInterval(function () {
+      var r = S.liveRadar && S.liveRadar.radars[S.bomRadarId]; if (!r || !r.frames.length) return;
+      S.bomFrameIx = (S.bomFrameIx + 1) % r.frames.length; bomShow();
+    }, S.bomFrameIx === (S.liveRadar.radars[S.bomRadarId].frames.length - 1) ? 1400 : 700);
+  }
+  function bomStop() {
+    S.bomPlaying = false; clearInterval(S.bomTimer);
+    el('bomPlay').innerHTML = '<svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor" stroke="none"/></svg>';
+  }
+
   function initRadar() {
+    showRadarSource();
     if (!S.map) {
       S.map = new MiniMap(el('map'), { lat: S.lat, lon: S.lon, zoom: 8, minZoom: 4, maxZoom: 12 });
       buildMapLayers();
@@ -969,6 +1150,10 @@
     });
     seg('modelSeg', 'md', function (v) { S.settings = C.Store.saveSettings({ model: v }); load(true); });
     seg('themeSeg', 't', function (v) { S.settings = C.Store.saveSettings({ theme: v }); applyTheme(); });
+    seg('learnSeg', 'l', function (v) { S.settings = C.Store.saveSettings({ learn: v === '1' }); computeScores(); renderAll(); });
+    el('resetWeights').addEventListener('click', function () {
+      S.settings = C.Store.saveSettings({ weights: {} }); computeScores(); renderAll();
+    });
     el('windLim').addEventListener('input', function () {
       el('windLimVal').textContent = this.value;
       S.settings = C.Store.saveSettings({ windLimit: +this.value });
@@ -1002,6 +1187,7 @@
     el('windLim').value = S.settings.windLimit; el('windLimVal').textContent = S.settings.windLimit;
     el('swellLim').value = S.settings.swellLimit; el('swellLimVal').textContent = (+S.settings.swellLimit).toFixed(1);
 
+    renderWeights();
     el('speciesPick').innerHTML = D.SPECIES.map(function (s) {
       var on = S.settings.species.indexOf(s.n) >= 0;
       return '<button class="chip' + (on ? ' sel' : '') + '" data-sp="' + esc(s.n) + '">' + esc(s.n) + '</button>';
@@ -1015,6 +1201,30 @@
       renderSettings(); computeScores(); renderNow();
     };
     renderLog();
+  }
+
+  var FACTOR_NAMES = { wind: 'Wind', pressure: 'Barometer', light: 'Dawn & dusk', solunar: 'Moon timing',
+    tide: 'Tide', swell: 'Swell', cloud: 'Cloud & rain', sst: 'Water temp' };
+
+  function renderWeights() {
+    var W = S.settings.weights || {}, L = S.learned || { ready: false, mult: {} };
+    el('weightList').innerHTML = Object.keys(FACTOR_NAMES).map(function (k) {
+      var v = W[k] != null ? W[k] : 1;
+      var learned = L.mult[k] != null && Math.abs(L.mult[k] - 1) > 0.02 ? ' <span class="muted">· log says ×' + L.mult[k].toFixed(2) + '</span>' : '';
+      return '<div class="field" style="margin-bottom:8px"><label>' + FACTOR_NAMES[k] + ' — <b id="wv_' + k + '">×' + v.toFixed(2) + '</b>' + learned + '</label>' +
+        '<input type="range" data-w="' + k + '" min="0.5" max="1.5" step="0.05" value="' + v + '"></div>';
+    }).join('');
+    el('weightList').oninput = function (e) {
+      var r = e.target.closest('input[data-w]'); if (!r) return;
+      el('wv_' + r.dataset.w).textContent = '×' + (+r.value).toFixed(2);
+      var w = S.settings.weights || {}; w[r.dataset.w] = +r.value;
+      S.settings = C.Store.saveSettings({ weights: w });
+    };
+    el('weightList').onchange = function () { computeScores(); renderAll(); };
+    el('learnNote').innerHTML = L.ready
+      ? 'Learned from ' + L.n + ' logged catches' + (L.notes.length ? ': ' + esc(L.notes.join(', ')) + '.' : '. Nothing stands out yet.')
+      : 'Log ' + Math.max(0, 6 - (L.n || 0)) + ' more catches and the app starts weighting what actually produces for you.';
+    setSeg('learnSeg', 'l', S.settings.learn ? '1' : '0');
   }
 
   function renderLog() {
@@ -1084,7 +1294,8 @@
         sst: S.detail && S.detail.sst != null ? Math.round(S.detail.sst * 10) / 10 : null,
         moon: S.sol ? Math.round(S.sol.illumination.fraction * 100) : null,
         moonPeriod: moonNow, lowLight: lowLight,
-        score: S.detail ? S.detail.score : null
+        score: S.detail ? S.detail.score : null,
+        parts: S.detail ? S.detail.parts.map(function (p) { return { key: p.key, f: Math.round(p.f * 100) / 100 }; }) : null
       });
       closeSheet(); renderLog();
       alertBanner('Catch logged.', 'info');

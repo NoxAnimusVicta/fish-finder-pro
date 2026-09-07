@@ -27,7 +27,9 @@
         swellLimit: s.swellLimit || 2.0,           // metres
         model: s.model || 'bom_access_global',
         theme: s.theme || 'auto',
-        unitsWind: s.unitsWind || 'kn'
+        unitsWind: s.unitsWind || 'kn',
+        weights: s.weights || {},                  // expert multipliers per factor
+        learn: s.learn !== false                   // let the catch log tune weights
       };
     },
     saveSettings: function (patch) {
@@ -161,6 +163,126 @@
 
     radarIndex: function () {
       return withTimeout('https://api.rainviewer.com/public/weather-maps.json', 12000);
+    },
+
+    /* Files the 10-minute GitHub Action force-pushes to the `live` branch:
+       BOM station observations and radar frames. Served raw from GitHub,
+       which sends open CORS headers. Falls back to ./live/ for local tests. */
+    liveBase: function () {
+      try {
+        var h = location.hostname, parts = location.pathname.split('/').filter(Boolean);
+        if (/\.github\.io$/.test(h) && parts.length) {
+          return 'https://raw.githubusercontent.com/' + h.split('.')[0] + '/' + parts[0] + '/live/';
+        }
+      } catch (e) {}
+      return './live/';
+    },
+    live: function (name, ttlMin) {
+      var url = Api.liveBase() + name + '?t=' + Math.floor(Date.now() / 300000);
+      return cachedJson('live.' + name, url, ttlMin || 4);
+    },
+
+    /* BOM's own ensemble (ACCESS-GE) for spread, i.e. how sure the model is. */
+    ensemble: function (lat, lon) {
+      var base = 'https://ensemble-api.open-meteo.com/v1/ensemble?latitude=' + round4(lat) +
+        '&longitude=' + round4(lon) + '&hourly=wind_speed_10m,wind_gusts_10m' +
+        '&timezone=' + encodeURIComponent(TZ) + '&timeformat=unixtime&wind_speed_unit=kn&forecast_days=7';
+      var key = 'ens.' + round4(lat) + ',' + round4(lon);
+      return cachedJson(key, base + '&models=bom_access_global_ensemble', 120).catch(function () {
+        return cachedJson(key + '.ec', base + '&models=ecmwf_ifs025', 120);
+      });
+    }
+  };
+
+  /* ==================== observations ==================================== */
+
+  var Obs = {
+    /* Nearest BOM weather station with a recent reading. */
+    nearest: function (live, lat, lon, maxKm) {
+      if (!live || !live.stations) return null;
+      var best = null, bd = maxKm || 40;
+      for (var i = 0; i < live.stations.length; i++) {
+        var st = live.stations[i];
+        if (st.lat == null || st.lon == null) continue;
+        var d = haversine(lat, lon, st.lat, st.lon);
+        if (d < bd && (st.windKt != null || st.pressure != null)) { bd = d; best = st; }
+      }
+      if (!best) return null;
+      var out = {}; for (var k in best) out[k] = best[k];
+      out.km = Math.round(bd);
+      out.ageMin = live.fetched ? Math.round((Date.now() - live.fetched * 1000) / 60000) : null;
+      if (best.time) out.ageMin = Math.round((Date.now() - best.time * 1000) / 60000);
+      return out;
+    },
+
+    /* Nudge the next few hours of the model toward what the station is
+       actually reading. The correction decays to nothing over `hours` so a
+       stale reading cannot poison tomorrow. Returns the delta applied. */
+    apply: function (wx, obs, hours) {
+      if (!wx || !wx.hourly || !obs || obs.ageMin == null || obs.ageMin > 90) return null;
+      hours = hours || 6;
+      var H = wx.hourly, T = H.time, now = Date.now();
+      var mw = sampleSeries(T, H.wind_speed_10m, now), mg = sampleSeries(T, H.wind_gusts_10m, now);
+      var mp = sampleSeries(T, H.pressure_msl, now), mt = sampleSeries(T, H.temperature_2m, now);
+      var d = {
+        wind: (obs.windKt != null && mw != null) ? obs.windKt - mw : 0,
+        gust: (obs.gustKt != null && mg != null) ? obs.gustKt - mg : 0,
+        pressure: (obs.pressure != null && mp != null) ? obs.pressure - mp : 0,
+        temp: (obs.temp != null && mt != null) ? obs.temp - mt : 0
+      };
+      /* Clamp so a station in a wind tunnel cannot drag the forecast to silly places. */
+      d.wind = clamp(d.wind, -12, 12); d.gust = clamp(d.gust, -15, 15);
+      d.pressure = clamp(d.pressure, -6, 6); d.temp = clamp(d.temp, -6, 6);
+      if (!wx._raw) {
+        wx._raw = { wind_speed_10m: H.wind_speed_10m.slice(), wind_gusts_10m: H.wind_gusts_10m.slice(),
+                    pressure_msl: H.pressure_msl.slice(), temperature_2m: H.temperature_2m.slice() };
+      }
+      for (var i = 0; i < T.length; i++) {
+        var dtH = (T[i] * 1000 - now) / HOUR;
+        if (dtH < -1 || dtH > hours) continue;
+        var w = dtH <= 0 ? 1 : 1 - dtH / hours;
+        H.wind_speed_10m[i] = Math.max(0, wx._raw.wind_speed_10m[i] + d.wind * w);
+        H.wind_gusts_10m[i] = Math.max(0, wx._raw.wind_gusts_10m[i] + d.gust * w);
+        H.pressure_msl[i] = wx._raw.pressure_msl[i] + d.pressure * Math.max(w, 0.5);
+        H.temperature_2m[i] = wx._raw.temperature_2m[i] + d.temp * w;
+      }
+      d.modelWind = mw; d.modelPressure = mp; d.modelTemp = mt;
+      return d;
+    }
+  };
+
+  function haversine(a, b, c, d) {
+    var R = 6371, p = Math.PI / 180;
+    var x = Math.sin((c - a) * p / 2), y = Math.sin((d - b) * p / 2);
+    var h = x * x + Math.cos(a * p) * Math.cos(c * p) * y * y;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  /* ==================== ensemble spread ================================= */
+
+  var Ensemble = {
+    /* Per-hour standard deviation of wind across members, in knots. */
+    spread: function (ens) {
+      if (!ens || !ens.hourly || !ens.hourly.time) return null;
+      var H = ens.hourly, keys = Object.keys(H).filter(function (k) { return /^wind_speed_10m/.test(k); });
+      if (keys.length < 3) return null;
+      var T = H.time, out = [];
+      for (var i = 0; i < T.length; i++) {
+        var n = 0, sum = 0, sq = 0;
+        for (var k = 0; k < keys.length; k++) {
+          var v = H[keys[k]][i]; if (v == null) continue;
+          n++; sum += v; sq += v * v;
+        }
+        out.push(n > 2 ? Math.sqrt(Math.max(0, sq / n - (sum / n) * (sum / n))) : null);
+      }
+      return { time: T, sd: out, members: keys.length };
+    },
+    at: function (sp, whenMs) { return sp ? sampleSeries(sp.time, sp.sd, whenMs) : null; },
+    label: function (sd) {
+      if (sd == null) return null;
+      if (sd < 2.5) return { text: 'High confidence', tone: 'great' };
+      if (sd < 5) return { text: 'Fair confidence', tone: 'ok' };
+      return { text: 'Low confidence', tone: 'bad' };
     }
   };
 
@@ -316,27 +438,27 @@
 
   /* ==================== bite score ====================================== */
 
-  /* Wind directions that blow OFF the NSW coast flatten the surface and clean
-     the water up; a hard onshore north-easter does the opposite. */
-  function windDirFactor(dir, kinds) {
-    if (dir == null) return 0;
-    var d = ((dir % 360) + 360) % 360;
-    var offshore = (d >= 225 && d <= 340);        // W through NW
-    var onshore = (d >= 20 && d <= 110);          // NE through E
-    var coastal = kinds.indexOf('b') >= 0 || kinds.indexOf('r') >= 0 || kinds.indexOf('o') >= 0;
-    if (!coastal) return 0;
-    if (offshore) return 0.10;
-    if (onshore) return -0.05;
-    return 0;
+  /* How much of the wind is blowing straight at this spot. Uses the bearing
+     the spot faces, so a westerly at Callala Bay (faces SE) is offshore and
+     flattens the bay, while the same westerly at Currarong (faces NE) is
+     side-shore. Rivers and lakes return 0. */
+  function exposure(dir, faces) {
+    if (dir == null || faces == null) return { on: 0, off: 0 };
+    var diff = Math.abs(((dir - faces) % 360 + 540) % 360 - 180);   // 0 = dead onshore
+    var c = Math.cos(diff * Math.PI / 180);
+    return { on: Math.max(0, c), off: Math.max(0, -c) };
   }
 
-  function windFactor(kt, gust, dir, limit, kinds) {
+  function windFactor(kt, gust, dir, limit, kinds, faces) {
     if (kt == null) return 0.5;
     var f;
     if (kt <= 8) f = 1;
     else f = clamp(1 - (kt - 8) / Math.max(4, (limit - 8) * 1.35), 0, 1);
     if (gust != null && kt > 0 && gust > kt * 1.6 && kt > 10) f *= 0.9;
-    return clamp(f + windDirFactor(dir, kinds), 0, 1);
+    var ex = exposure(dir, faces);
+    var strength = clamp((kt - 5) / 12, 0, 1.4);
+    f += 0.12 * ex.off - 0.14 * ex.on * strength;
+    return clamp(f, 0, 1);
   }
 
   function pressureFactor(p, d3, d24) {
@@ -433,10 +555,11 @@
       var cloud = sampleSeries(T, H.cloud_cover, whenMs);
       var rainNow = sampleSeries(T, H.precipitation, whenMs);
 
-      var mm24 = 0, i;
+      var mm24 = 0, mm72 = 0, i;
       for (i = 0; i < T.length; i++) {
-        var ts = T[i] * 1000;
-        if (ts > whenMs - 24 * HOUR && ts <= whenMs) mm24 += ((H.precipitation && H.precipitation[i]) || 0);
+        var ts = T[i] * 1000, mm = (H.precipitation && H.precipitation[i]) || 0;
+        if (ts > whenMs - 24 * HOUR && ts <= whenMs) mm24 += mm;
+        if (ts > whenMs - 72 * HOUR && ts <= whenMs) mm72 += mm;
       }
 
       var sp = ctx.species && ctx.species.length ? ctx.species[0] : null;
@@ -454,13 +577,16 @@
       var tf = tideFactor(tide, whenMs, maxRate, tidePref);
       var sw = swellFactor(waveH != null ? waveH : swellH, period, ctx.kinds, ctx.swellLimit);
 
-      var parts = [];
-      function add(key, label, f, w) { parts.push({ key: key, label: label, f: f, w: w }); }
+      var parts = [], W = ctx.weights || {};
+      function add(key, label, f, w) {
+        var m = W[key] != null ? W[key] : 1;
+        parts.push({ key: key, label: label, f: f, w: w * m, base: w, mult: m });
+      }
 
       var boat = ctx.access === 'boat';
       var coastal = ctx.kinds.indexOf('o') >= 0 || ctx.kinds.indexOf('b') >= 0 || ctx.kinds.indexOf('r') >= 0;
 
-      add('wind', 'Wind', windFactor(kt, gust, dir, ctx.windLimit, ctx.kinds), boat ? 24 : 17);
+      add('wind', 'Wind', windFactor(kt, gust, dir, ctx.windLimit, ctx.kinds, ctx.faces), boat ? 24 : 17);
       add('pressure', 'Barometer', pressureFactor(pres, pres != null && pres3 != null ? pres - pres3 : null,
         pres != null && pres24 != null ? pres - pres24 : null), 12);
       add('light', 'Light', lightFactor(whenMs, sun.sunrise && sun.sunrise.valueOf(), sun.sunset && sun.sunset.valueOf(), nightBiter), 16);
@@ -468,7 +594,7 @@
       if (tide) add('tide', 'Tide', tf.f, ctx.kinds.indexOf('e') >= 0 ? 20 : (coastal ? 13 : 0));
       if (coastal) add('swell', 'Swell', sw.f, ctx.kinds.indexOf('b') >= 0 || ctx.kinds.indexOf('r') >= 0 ? 18 : 13);
       add('cloud', 'Cloud & rain', clamp((cloud != null ? (0.55 + 0.45 * Math.min(cloud, 85) / 85) : 0.7) *
-        rainFactor(rainNow, mm24, ctx.kinds, likesFresh), 0, 1), 8);
+        rainFactor(rainNow, mm72 > 40 ? mm72 : mm24, ctx.kinds, likesFresh), 0, 1), 8);
       if (sp && sst != null) add('sst', 'Water temp', tempFactor(sst, sp.temp), 12);
 
       var num = 0, den = 0;
@@ -486,7 +612,7 @@
         parts: parts, seasonMult: seasonMult,
         wind: kt, gust: gust, dir: dir, pressure: pres,
         pressureTrend: (pres != null && pres3 != null) ? pres - pres3 : null,
-        cloud: cloud, rain: rainNow, rain24: mm24,
+        cloud: cloud, rain: rainNow, rain24: mm24, rain72: mm72,
         swell: swellH, wave: waveH, period: period, sst: sst,
         tideState: tf.state || null, hazard: sw.hazard
       };
@@ -507,9 +633,11 @@
           sunCache[k] = global.Astro.sunTimes(d, ctx.lat, ctx.lon, tz);
           solCache[k] = global.Astro.solunar(d, ctx.lat, ctx.lon, tz).periods;
         }
-        var c = { kinds: ctx.kinds, access: ctx.access, windLimit: ctx.windLimit, swellLimit: ctx.swellLimit, species: ctx.species, month: dayKey.month - 1 };
+        var c = { kinds: ctx.kinds, access: ctx.access, windLimit: ctx.windLimit, swellLimit: ctx.swellLimit,
+                  species: ctx.species, month: dayKey.month - 1, faces: ctx.faces, weights: ctx.weights };
         var s = Score.at(t, wx, marine, tide, sunCache[k], solCache[k], c);
-        out.push({ t: t, score: s.score, wind: s.wind, dir: s.dir, hazard: s.hazard });
+        out.push({ t: t, score: s.score, wind: s.wind, dir: s.dir, hazard: s.hazard,
+                   sd: Ensemble.at(ctx.spread, t) });
       }
       return out;
     },
@@ -531,9 +659,13 @@
         var a = i, b = i;
         while (a > 0 && sm[a - 1].s >= floor && (sm[i].t - sm[a - 1].t) <= 2.5 * HOUR) a--;
         while (b < sm.length - 1 && sm[b + 1].s >= floor && (sm[b + 1].t - sm[i].t) <= 2.5 * HOUR) b++;
-        var peak = 0, sum = 0;
-        for (var k = a; k <= b; k++) { peak = Math.max(peak, sm[k].raw); sum += sm[k].raw; }
-        cand.push({ start: sm[a].t, end: sm[b].t + HOUR, peak: peak, avg: Math.round(sum / (b - a + 1)) });
+        var peak = 0, sum = 0, sdSum = 0, sdN = 0;
+        for (var k = a; k <= b; k++) {
+          peak = Math.max(peak, sm[k].raw); sum += sm[k].raw;
+          if (pts[k].sd != null) { sdSum += pts[k].sd; sdN++; }
+        }
+        cand.push({ start: sm[a].t, end: sm[b].t + HOUR, peak: peak, avg: Math.round(sum / (b - a + 1)),
+                    sd: sdN ? sdSum / sdN : null });
       }
       cand.sort(function (x, y) { return y.peak - x.peak || y.avg - x.avg || x.start - y.start; });
 
@@ -551,6 +683,30 @@
         kept.push(w);
       }
       return kept.sort(function (x, y) { return y.peak - x.peak || x.start - y.start; });
+    },
+
+    /* What the log says about him. For each factor, compare its value at the
+       moment of each catch with its typical value, and nudge the weight. Needs
+       a handful of catches before it says anything, and never moves a weight
+       by more than about a third. */
+    learn: function (log) {
+      var entries = (log || []).filter(function (e) { return e.parts && e.parts.length; });
+      if (entries.length < 6) return { ready: false, n: entries.length, mult: {} };
+      var sum = {}, n = {};
+      entries.forEach(function (e) {
+        e.parts.forEach(function (p) { sum[p.key] = (sum[p.key] || 0) + p.f; n[p.key] = (n[p.key] || 0) + 1; });
+      });
+      var mult = {}, notes = [];
+      for (var k in sum) {
+        if (n[k] < 4) continue;
+        var mean = sum[k] / n[k];             // 0..1 — how good this factor tended to be when he caught
+        var lift = mean - 0.6;                // 0.6 is a fair "typical" value for a factor
+        var m = clamp(1 + lift * 1.6, 0.7, 1.35);
+        mult[k] = Math.round(m * 100) / 100;
+        if (m > 1.12) notes.push(k + ' up');
+        if (m < 0.9) notes.push(k + ' down');
+      }
+      return { ready: true, n: entries.length, mult: mult, notes: notes };
     },
 
     verdict: function (n) {
@@ -584,7 +740,8 @@
   };
 
   global.Core = {
-    TZ: TZ, Store: Store, Api: Api, Tides: Tides, Score: Score,
+    TZ: TZ, Store: Store, Api: Api, Tides: Tides, Score: Score, Obs: Obs, Ensemble: Ensemble,
+    haversine: haversine,
     sampleSeries: sampleSeries, sampleNearest: sampleNearest,
     degToCompass: degToCompass, clamp: clamp
   };
