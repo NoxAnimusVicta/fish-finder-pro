@@ -1,0 +1,367 @@
+/* data.js — NSW spots, tide reference ports, BOM radars, species.
+   All static. Nothing here needs the network. */
+(function (global) {
+  'use strict';
+
+  /* ---------------- BOM tide standard ports ---------------------------- */
+  /* aac = BOM Australian Area Code used by the tide product.
+     msl = metres to add to a mean-sea-level height to land on the chart
+     datum BOM tide tables use (MHL station datum analysis, 1995-2014). */
+  var PORTS = {
+    yamba:      { name: 'Yamba',              aac: 'NSW_TP008', lat: -29.43, lon: 153.36, msl: 0.945 },
+    newcastle:  { name: 'Newcastle',          aac: 'NSW_TP004', lat: -32.92, lon: 151.79, msl: 0.93 },
+    sydney:     { name: 'Sydney (Fort Denison)', aac: 'NSW_TP007', lat: -33.85, lon: 151.23, msl: 0.965 },
+    botany:     { name: 'Botany Bay',         aac: 'NSW_TP001', lat: -33.98, lon: 151.21, msl: 0.93 },
+    portkembla: { name: 'Port Kembla',        aac: 'NSW_TP006', lat: -34.47, lon: 150.91, msl: 0.93 },
+    eden:       { name: 'Eden',               aac: 'NSW_TP002', lat: -37.07, lon: 149.90, msl: 0.844 }
+  };
+
+  /* ---------------- BOM radars ----------------------------------------- */
+  var RADARS = {
+    IDR283: { name: 'Grafton',            lat: -29.62, lon: 152.97, base: 'IDR28' },
+    IDR043: { name: 'Newcastle',          lat: -32.73, lon: 152.03, base: 'IDR04' },
+    IDR713: { name: 'Sydney (Terrey Hills)', lat: -33.70, lon: 151.21, base: 'IDR71' },
+    IDR033: { name: 'Wollongong (Appin)', lat: -34.26, lon: 150.87, base: 'IDR03' },
+    IDR403: { name: 'Canberra (Captains Flat)', lat: -35.66, lon: 149.51, base: 'IDR40' },
+    IDR553: { name: 'Wagga Wagga',        lat: -35.17, lon: 147.47, base: 'IDR55' },
+    IDR533: { name: 'Moree',              lat: -29.50, lon: 149.85, base: 'IDR53' },
+    IDR693: { name: 'Namoi',              lat: -31.02, lon: 150.19, base: 'IDR69' },
+    IDR963: { name: 'Yeoval',             lat: -32.74, lon: 148.70, base: 'IDR96' },
+    IDR943: { name: 'Hillston',           lat: -33.55, lon: 145.52, base: 'IDR94' },
+    IDR933: { name: 'Brewarrina',         lat: -29.96, lon: 146.81, base: 'IDR93' }
+  };
+
+  /* ---------------- BOM coastal waters districts ------------------------ */
+  var DISTRICTS = {
+    byron:     'Byron Coast',
+    coffs:     'Coffs Coast',
+    macquarie: 'Macquarie Coast',
+    hunter:    'Hunter Coast',
+    sydney:    'Sydney Coast',
+    illawarra: 'Illawarra Coast',
+    batemans:  'Batemans Coast',
+    eden:      'Eden Coast'
+  };
+
+  /* ---------------- Spots ----------------------------------------------
+     [ name, region, lat, lon, seaLat, seaLon, port, hwOffMin, lwOffMin,
+       radar, district, kinds, note ]
+     kinds: e estuary  b beach  r rock  o offshore  f freshwater
+     Offsets are minutes to ADD to the reference port's tide time. Open-coast
+     entrances are 0; upriver figures come from the NSW tide tables.
+     A note beginning "!" flags a spot where tide HEIGHTS are unreliable
+     (damped lake or far upriver) even though the times are usable.        */
+  var SPOT_ROWS = [
+    // ---- Far North Coast
+    ['Tweed Heads / Tweed River', 'Far North Coast', -28.171, 153.545, -28.17, 153.72, 'yamba', 30, 60, 'IDR283', 'byron', 'ebro', ''],
+    ['Kingscliff', 'Far North Coast', -28.256, 153.581, -28.26, 153.73, 'yamba', 0, 0, 'IDR283', 'byron', 'bro', ''],
+    ['Brunswick Heads', 'Far North Coast', -28.540, 153.552, -28.54, 153.72, 'yamba', 6, 6, 'IDR283', 'byron', 'ebro', ''],
+    ['Byron Bay', 'Far North Coast', -28.643, 153.612, -28.64, 153.78, 'yamba', 0, 0, 'IDR283', 'byron', 'bro', ''],
+    ['Ballina / Richmond River', 'Far North Coast', -28.868, 153.586, -28.87, 153.74, 'yamba', 15, 15, 'IDR283', 'byron', 'ebro', ''],
+    ['Evans Head', 'Far North Coast', -29.115, 153.432, -29.12, 153.60, 'yamba', 10, 10, 'IDR283', 'byron', 'ebro', ''],
+    ['Yamba / Clarence River', 'Far North Coast', -29.437, 153.362, -29.44, 153.53, 'yamba', 0, 0, 'IDR283', 'coffs', 'ebro', ''],
+    ['Iluka', 'Far North Coast', -29.410, 153.354, -29.41, 153.53, 'yamba', 0, 0, 'IDR283', 'coffs', 'ebr', ''],
+    ['Maclean (Clarence)', 'Far North Coast', -29.457, 153.198, null, null, 'yamba', 135, 145, 'IDR283', 'coffs', 'e', '!Well upriver — heights are much smaller than at the entrance.'],
+    ['Grafton (Clarence)', 'Far North Coast', -29.690, 152.933, null, null, 'yamba', 250, 270, 'IDR283', 'coffs', 'ef', '!Far upriver — treat heights as indicative only.'],
+    // ---- North / Mid North Coast
+    ['Wooli', 'North Coast', -29.867, 153.267, -29.87, 153.43, 'yamba', 10, 10, 'IDR283', 'coffs', 'ebro', ''],
+    ['Coffs Harbour', 'North Coast', -30.301, 153.144, -30.30, 153.31, 'yamba', 0, 0, 'IDR283', 'coffs', 'bro', ''],
+    ['Sawtell', 'North Coast', -30.373, 153.104, -30.37, 153.27, 'yamba', 0, 0, 'IDR283', 'coffs', 'bro', ''],
+    ['Nambucca Heads', 'Mid North Coast', -30.643, 153.006, -30.64, 153.17, 'newcastle', 10, 10, 'IDR043', 'coffs', 'ebro', ''],
+    ['South West Rocks', 'Mid North Coast', -30.885, 153.041, -30.89, 153.21, 'newcastle', 23, 23, 'IDR043', 'macquarie', 'ebro', ''],
+    ['Port Macquarie', 'Mid North Coast', -31.431, 152.911, -31.44, 153.08, 'newcastle', 20, 20, 'IDR043', 'macquarie', 'ebro', ''],
+    ['Camden Haven / Laurieton', 'Mid North Coast', -31.646, 152.797, -31.66, 152.94, 'newcastle', 30, 60, 'IDR043', 'macquarie', 'ebro', ''],
+    ['Crowdy Head', 'Mid North Coast', -31.837, 152.752, -31.84, 152.92, 'newcastle', 5, 5, 'IDR043', 'macquarie', 'bro', ''],
+    ['Harrington / Manning River', 'Mid North Coast', -31.871, 152.688, -31.87, 152.87, 'newcastle', 15, 20, 'IDR043', 'macquarie', 'ebro', ''],
+    ['Forster / Tuncurry', 'Mid North Coast', -32.180, 152.516, -32.19, 152.68, 'newcastle', 5, 5, 'IDR043', 'macquarie', 'ebro', ''],
+    ['Wallis Lake', 'Mid North Coast', -32.253, 152.483, null, null, 'newcastle', 90, 120, 'IDR043', 'macquarie', 'e', '!Big lake system — the tide is heavily damped, heights are far smaller inside.'],
+    ['Seal Rocks', 'Mid North Coast', -32.442, 152.535, -32.45, 152.70, 'newcastle', 0, 0, 'IDR043', 'hunter', 'bro', ''],
+    // ---- Hunter / Central Coast
+    ['Port Stephens (Nelson Bay)', 'Hunter', -32.716, 152.148, -32.72, 152.34, 'newcastle', 30, 15, 'IDR043', 'hunter', 'ebro', ''],
+    ['Tea Gardens / Myall River', 'Hunter', -32.664, 152.156, null, null, 'newcastle', 90, 90, 'IDR043', 'hunter', 'e', ''],
+    ['Stockton Beach', 'Hunter', -32.880, 151.800, -32.88, 151.96, 'newcastle', 0, 0, 'IDR043', 'hunter', 'bro', ''],
+    ['Newcastle Harbour / Hunter River', 'Hunter', -32.925, 151.790, -32.93, 151.95, 'newcastle', 0, 0, 'IDR043', 'hunter', 'ebro', ''],
+    ['Swansea Channel', 'Hunter', -33.088, 151.646, -33.09, 151.80, 'newcastle', 20, 30, 'IDR043', 'hunter', 'eb', ''],
+    ['Lake Macquarie', 'Hunter', -33.060, 151.590, null, null, 'newcastle', 120, 160, 'IDR043', 'hunter', 'e', '!Australia’s largest coastal lake — tide range inside is only a fraction of the ocean.'],
+    ['Norah Head', 'Central Coast', -33.283, 151.578, -33.28, 151.74, 'sydney', 0, 0, 'IDR713', 'hunter', 'bro', ''],
+    ['The Entrance / Tuggerah Lakes', 'Central Coast', -33.345, 151.500, -33.35, 151.66, 'sydney', 30, 60, 'IDR713', 'hunter', 'eb', '!Lake side is damped; the channel runs hard.'],
+    ['Terrigal / Avoca', 'Central Coast', -33.447, 151.446, -33.45, 151.61, 'sydney', 0, 0, 'IDR713', 'sydney', 'bro', ''],
+    ['Brisbane Water (Gosford)', 'Central Coast', -33.470, 151.330, null, null, 'sydney', 60, 75, 'IDR713', 'sydney', 'e', ''],
+    ['Hawkesbury River (Brooklyn)', 'Central Coast', -33.545, 151.207, null, null, 'sydney', 60, 60, 'IDR713', 'sydney', 'ef', ''],
+    ['Wisemans Ferry (Hawkesbury)', 'Central Coast', -33.383, 150.980, null, null, 'sydney', 145, 155, 'IDR713', 'sydney', 'ef', '!Far upriver — heights indicative only.'],
+    // ---- Sydney
+    ['Pittwater / Broken Bay', 'Sydney', -33.600, 151.300, -33.58, 151.45, 'sydney', 8, 8, 'IDR713', 'sydney', 'ebro', ''],
+    ['Palm Beach', 'Sydney', -33.598, 151.325, -33.60, 151.47, 'sydney', 5, 5, 'IDR713', 'sydney', 'bro', ''],
+    ['Narrabeen / Long Reef', 'Sydney', -33.730, 151.300, -33.73, 151.45, 'sydney', 3, 3, 'IDR713', 'sydney', 'ebro', ''],
+    ['Middle Harbour / The Spit', 'Sydney', -33.803, 151.246, -33.83, 151.42, 'sydney', 0, 0, 'IDR713', 'sydney', 'e', ''],
+    ['Sydney Harbour', 'Sydney', -33.855, 151.230, -33.84, 151.40, 'sydney', 0, 0, 'IDR713', 'sydney', 'ebro', ''],
+    ['Parramatta River', 'Sydney', -33.840, 151.070, null, null, 'sydney', 14, 14, 'IDR713', 'sydney', 'e', ''],
+    ['Maroubra / Malabar', 'Sydney', -33.950, 151.260, -33.95, 151.41, 'sydney', 0, 0, 'IDR713', 'sydney', 'bro', ''],
+    ['Botany Bay', 'Sydney', -33.980, 151.190, -34.01, 151.36, 'botany', 0, 0, 'IDR713', 'sydney', 'ebro', ''],
+    ['Georges River', 'Sydney', -33.980, 151.070, null, null, 'botany', 30, 40, 'IDR713', 'sydney', 'e', ''],
+    ['Cronulla / Bate Bay', 'Sydney', -34.055, 151.155, -34.06, 151.31, 'botany', 0, 0, 'IDR713', 'sydney', 'bro', ''],
+    ['Port Hacking', 'Sydney', -34.075, 151.130, -34.09, 151.30, 'botany', 5, 5, 'IDR713', 'sydney', 'ebro', ''],
+    // ---- Illawarra
+    ['Stanwell Park / Coalcliff', 'Illawarra', -34.230, 150.990, -34.23, 151.14, 'portkembla', 0, 0, 'IDR033', 'illawarra', 'bro', ''],
+    ['Wollongong', 'Illawarra', -34.424, 150.899, -34.42, 151.05, 'portkembla', 0, 0, 'IDR033', 'illawarra', 'bro', ''],
+    ['Port Kembla', 'Illawarra', -34.470, 150.910, -34.48, 151.06, 'portkembla', 0, 0, 'IDR033', 'illawarra', 'ebro', ''],
+    ['Lake Illawarra', 'Illawarra', -34.540, 150.850, null, null, 'portkembla', 75, 110, 'IDR033', 'illawarra', 'e', '!Damped lake — heights inside are much smaller.'],
+    ['Shellharbour / Bass Point', 'Illawarra', -34.580, 150.870, -34.58, 151.02, 'portkembla', 0, 0, 'IDR033', 'illawarra', 'bro', ''],
+    ['Kiama', 'Illawarra', -34.672, 150.855, -34.67, 151.00, 'portkembla', 0, 0, 'IDR033', 'illawarra', 'bro', ''],
+    ['Gerroa / Seven Mile Beach', 'Illawarra', -34.760, 150.810, -34.76, 150.96, 'portkembla', 0, 0, 'IDR033', 'illawarra', 'bro', ''],
+    // ---- South Coast (Shoalhaven / Jervis Bay)
+    ['Shoalhaven Heads', 'South Coast', -34.851, 150.745, -34.85, 150.90, 'portkembla', 65, 70, 'IDR033', 'illawarra', 'ebr', ''],
+    ['Crookhaven Heads / Culburra', 'South Coast', -34.905, 150.752, -34.91, 150.91, 'portkembla', 16, 16, 'IDR033', 'batemans', 'ebro', ''],
+    ['Greenwell Point', 'South Coast', -34.905, 150.720, null, null, 'portkembla', 45, 45, 'IDR033', 'batemans', 'e', ''],
+    ['Nowra (Shoalhaven River)', 'South Coast', -34.876, 150.600, null, null, 'portkembla', 125, 140, 'IDR033', 'batemans', 'ef', '!Well upriver — heights indicative only.'],
+    ['Currarong', 'South Coast', -35.011, 150.827, -35.01, 150.99, 'portkembla', 5, 5, 'IDR033', 'batemans', 'bro', ''],
+    ['Callala Bay', 'South Coast', -35.001, 150.706, -35.05, 150.90, 'portkembla', 8, 8, 'IDR033', 'batemans', 'ebro', 'Jervis Bay Marine Park — check the zoning before you fish.'],
+    ['Huskisson (Jervis Bay)', 'South Coast', -35.041, 150.669, -35.08, 150.90, 'portkembla', 8, 8, 'IDR033', 'batemans', 'ebro', 'Jervis Bay Marine Park — check the zoning before you fish.'],
+    ['Vincentia / Plantation Point', 'South Coast', -35.077, 150.677, -35.10, 150.90, 'portkembla', 8, 8, 'IDR033', 'batemans', 'ebro', 'Jervis Bay Marine Park — check the zoning before you fish.'],
+    ['Sussex Inlet', 'South Coast', -35.157, 150.586, -35.17, 150.78, 'portkembla', 45, 75, 'IDR033', 'batemans', 'eb', '!St Georges Basin behind the inlet is heavily damped.'],
+    ['Ulladulla / Mollymook', 'South Coast', -35.355, 150.474, -35.36, 150.64, 'portkembla', 0, 0, 'IDR033', 'batemans', 'ebro', ''],
+    ['Burrill Lake', 'South Coast', -35.390, 150.450, null, null, 'portkembla', 55, 80, 'IDR033', 'batemans', 'eb', '!Damped lake.'],
+    ['Batemans Bay / Clyde River', 'South Coast', -35.708, 150.180, -35.72, 150.36, 'eden', 15, 15, 'IDR403', 'batemans', 'ebro', ''],
+    ['Moruya River', 'South Coast', -35.910, 150.150, -35.92, 150.32, 'eden', 20, 25, 'IDR403', 'batemans', 'ebro', ''],
+    ['Narooma / Wagonga Inlet', 'Far South Coast', -36.213, 150.135, -36.22, 150.31, 'eden', 45, 30, 'IDR403', 'batemans', 'ebro', ''],
+    ['Bermagui', 'Far South Coast', -36.424, 150.072, -36.43, 150.25, 'eden', 8, 8, 'IDR403', 'eden', 'ebro', ''],
+    ['Tathra', 'Far South Coast', -36.733, 149.983, -36.74, 150.16, 'eden', 5, 5, 'IDR403', 'eden', 'bro', ''],
+    ['Merimbula', 'Far South Coast', -36.892, 149.912, -36.90, 150.09, 'eden', 40, 60, 'IDR403', 'eden', 'ebro', ''],
+    ['Pambula River', 'Far South Coast', -36.945, 149.900, -36.95, 150.08, 'eden', 40, 55, 'IDR403', 'eden', 'eb', ''],
+    ['Eden / Twofold Bay', 'Far South Coast', -37.065, 149.902, -37.08, 150.08, 'eden', 8, 8, 'IDR403', 'eden', 'ebro', ''],
+    // ---- Inland / freshwater
+    ['Lake Jindabyne', 'Inland', -36.412, 148.622, null, null, null, 0, 0, 'IDR403', null, 'f', ''],
+    ['Lake Eucumbene', 'Inland', -36.130, 148.630, null, null, null, 0, 0, 'IDR403', null, 'f', ''],
+    ['Thredbo River', 'Inland', -36.500, 148.330, null, null, null, 0, 0, 'IDR403', null, 'f', ''],
+    ['Tantangara / Upper Murrumbidgee', 'Inland', -35.800, 148.650, null, null, null, 0, 0, 'IDR403', null, 'f', ''],
+    ['Burrinjuck Dam', 'Inland', -35.000, 148.600, null, null, null, 0, 0, 'IDR553', null, 'f', ''],
+    ['Blowering Dam', 'Inland', -35.400, 148.250, null, null, null, 0, 0, 'IDR553', null, 'f', ''],
+    ['Wyangala Dam', 'Inland', -33.960, 148.960, null, null, null, 0, 0, 'IDR963', null, 'f', ''],
+    ['Burrendong Dam', 'Inland', -32.670, 149.100, null, null, null, 0, 0, 'IDR963', null, 'f', ''],
+    ['Copeton Dam', 'Inland', -29.900, 150.940, null, null, null, 0, 0, 'IDR533', null, 'f', ''],
+    ['Keepit Dam', 'Inland', -30.880, 150.500, null, null, null, 0, 0, 'IDR693', null, 'f', ''],
+    ['Glenbawn Dam', 'Inland', -32.100, 151.030, null, null, null, 0, 0, 'IDR043', null, 'f', ''],
+    ['Lake Windamere', 'Inland', -32.720, 149.850, null, null, null, 0, 0, 'IDR963', null, 'f', ''],
+    ['Murray River (Albury)', 'Inland', -36.070, 146.920, null, null, null, 0, 0, 'IDR553', null, 'f', ''],
+    ['Murrumbidgee (Wagga)', 'Inland', -35.110, 147.370, null, null, null, 0, 0, 'IDR553', null, 'f', ''],
+    ['Darling River (Bourke)', 'Inland', -30.090, 145.940, null, null, null, 0, 0, 'IDR933', null, 'f', ''],
+    ['Nepean River (Penrith)', 'Inland', -33.750, 150.680, null, null, null, 0, 0, 'IDR713', null, 'f', '']
+  ];
+
+  var KIND_NAME = { e: 'Estuary', b: 'Beach', r: 'Rock', o: 'Offshore', f: 'Freshwater' };
+
+  var SPOTS = SPOT_ROWS.map(function (r, i) {
+    return {
+      id: i,
+      name: r[0], region: r[1], lat: r[2], lon: r[3],
+      sea: (r[4] === null ? null : { lat: r[4], lon: r[5] }),
+      port: r[6], hwOff: r[7], lwOff: r[8],
+      radar: r[9], district: r[10],
+      kinds: r[11].split(''),
+      note: (r[12] || '').replace(/^!/, ''),
+      damped: /^!/.test(r[12] || '')
+    };
+  });
+
+  /* ---------------- Species --------------------------------------------
+     Legal limits verified against NSW DPIRD saltwater/freshwater bag and
+     size limit tables, September 2026. season: 12 values Jan..Dec where
+     0 = rarely about, 1 = around, 2 = peak run.                          */
+  var SPECIES = [
+    { n: 'Yellowfin bream', aka: 'bream, silver bream', cat: 'e', min: 25, max: null, bag: '10 combined with black bream & tarwhine (possession 20)', closed: null,
+      season: [1,2,2,2,2,2,2,2,1,1,1,1], temp: [16,24], tide: 'Either — moving water', time: 'Dawn & dusk',
+      run: 'Mature fish drop downstream and mass at river mouths, breakwalls and nearby beaches to spawn from late autumn through winter, then spread back through the estuaries in spring.',
+      baits: ['Peeled prawn','Beach worm','Mullet strip','Half pilchard'], lures: ['3-5 g soft plastic grubs','Small hardbody cranks','Surface poppers','3.5 g blades'], where: 'Statewide' },
+    { n: 'Dusky flathead', aka: 'dusky, lizard', cat: 'e', min: 36, max: 70, bag: '5 (possession 10) — 36-70 cm slot since 1 Aug 2026', closed: null,
+      season: [2,2,2,2,1,1,1,1,2,2,2,2], temp: [18,26], tide: 'Run-out', time: 'Dawn & dusk',
+      run: 'A resident ambush predator rather than a migrator — fish spread out of the deep winter holes onto the sand flats and drop-offs as water warms from September, with the big females most active over summer.',
+      baits: ['Live poddy mullet','Whitebait','Pilchard','Live nipper'], lures: ['4-5 in paddle-tails','Prawn vibes','Shallow hardbodies','Blades'], where: 'Statewide, best in the big lakes and rivers' },
+    { n: 'Sand whiting', aka: 'summer whiting', cat: 'e', min: 27, max: null, bag: '20', closed: null,
+      season: [2,2,2,1,1,0,0,0,1,2,2,2], temp: [19,26], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'Moves out of the estuaries to spawn in the surf zone and around river mouths through spring and summer; best on the flats in warm clear water on a big run-in tide.',
+      baits: ['Live beach worm','Live nipper','Bloodworm','Pipi'], lures: ['Small surface poppers','2 in wrigglers','Small blades'], where: 'Statewide' },
+    { n: 'Luderick', aka: 'blackfish, darkie', cat: 'e', min: 27, max: null, bag: '10 (possession 20)', closed: null,
+      season: [1,1,2,2,2,2,2,2,1,1,0,1], temp: [14,21], tide: 'Run-in', time: 'All day',
+      run: 'Schools leave the estuary weed beds and mass on ocean rocks and breakwalls to spawn through autumn and winter as the water cools and the swell builds, then filter back to the bridge pylons in spring.',
+      baits: ['Green weed','Sea cabbage','Peeled prawn','Sandworm'], lures: [], where: 'Statewide' },
+    { n: 'Mulloway', aka: 'jewfish, jewie, soapy', cat: 'e', min: 70, max: null, bag: '1 per person (2 per boat with 2+ aboard)', closed: null,
+      season: [2,2,2,2,1,1,1,1,2,2,2,2], temp: [15,24], tide: 'Either — moving water', time: 'Night',
+      run: 'Works between deep estuary holes and ocean beaches year round. The best sessions come on the four nights either side of new and full moon, on falling pressure ahead of a southerly, and one to three days after heavy rain pushes dirty water and baitfish out of the rivers.',
+      baits: ['Live mullet','Live squid','Live yellowtail','Fresh tailor fillet'], lures: ['110-130 mm plastics','40-60 g micro jigs','Large minnows','Heavy vibes'], where: 'Statewide' },
+    { n: 'Tarwhine', aka: 'silver bream', cat: 'e', min: 20, max: null, bag: '10 combined with bream (possession 20)', closed: null,
+      season: [2,2,2,2,1,1,1,1,1,1,2,2], temp: [17,24], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'Shadows yellowfin bream through the lower estuary and surf gutters, moving out to ocean beaches and headlands to spawn over the warmer months.',
+      baits: ['Peeled prawn','Beach worm','Pipi','Squid strip'], lures: ['Small plastics','Small blades'], where: 'Statewide, more common north of Sydney' },
+    { n: 'Estuary perch', aka: 'EP', cat: 'e', min: null, max: null, bag: '2 combined with Australian bass, only 1 over 35 cm in rivers', closed: '1 May – 31 Aug in rivers and estuaries (catch and release only)',
+      season: [2,2,2,2,0,0,0,0,1,2,2,2], temp: [15,24], tide: 'Run-out', time: 'Night',
+      run: 'Drops downstream into the salt reaches of coastal rivers to spawn over winter — the reason for the closure — then spreads back into the brackish snag and rock-bar country through spring.',
+      baits: ['Live shrimp','Live prawn','Scrub worms'], lures: ['Small minnows','3 in plastics','Small spinnerbaits','Surface walkers'], where: 'Coastal rivers, south coast to the mid north coast' },
+    { n: 'Blue swimmer crab', aka: 'blueys, sandy', cat: 'e', min: 6.5, max: null, bag: '10 (possession 20) — berried females must go back', closed: null,
+      season: [2,2,2,2,1,0,0,0,1,1,2,2], temp: [20,27], tide: 'Run-in', time: 'Night',
+      run: 'Moves up onto the shallow estuary flats and into the channels as water warms from October, peaking through summer and early autumn, then buries into deeper mud through the cold months.',
+      baits: ['Mullet frames','Chicken frames','Fish heads'], lures: [], where: 'Statewide, best from Botany Bay north' },
+    { n: 'Mud crab', aka: 'muddie, mangrove crab', cat: 'e', min: 8.5, max: null, bag: '5 — berried females must go back', closed: null,
+      season: [2,2,2,2,1,0,0,0,0,1,2,2], temp: [22,30], tide: 'Run-in', time: 'Night',
+      run: 'Warm-water crab that feeds hardest through summer and autumn in mangrove creeks and drains; post-rain runoff and water above about 22 °C gets them moving.',
+      baits: ['Mullet frames','Chicken frames','Fish heads'], lures: [], where: 'North from about Port Stephens' },
+    { n: 'Flounder', aka: 'largetooth flounder, sole', cat: 'e', min: 25, max: null, bag: '20 combined with sole', closed: null,
+      season: [1,1,2,2,2,1,1,1,1,1,1,1], temp: [16,24], tide: 'Low slack', time: 'Night',
+      run: 'Lies buried on estuary sand flats year round; numbers on the shallow flats build through autumn when calm clear nights make them easy to spot.',
+      baits: ['Live nipper','Whitebait','Peeled prawn'], lures: ['Small plastics','Small blades'], where: 'Statewide estuaries' },
+    { n: 'Eastern sea garfish', aka: 'gars, beakies', cat: 'e', min: null, max: null, bag: '20', closed: null,
+      season: [1,1,2,2,2,2,2,1,1,1,1,1], temp: [15,22], tide: 'Run-in', time: 'All day',
+      run: 'Holds over estuary weed beds and sheltered bays year round, thickening through the cooler months when a steady berley trail brings them up in calm clear water.',
+      baits: ['Bread dough','Prawn slivers','Maggots','Silverfish'], lures: [], where: 'Statewide' },
+    { n: 'Tailor', aka: 'chopper, bluefish', cat: 'b', min: 30, max: null, bag: '10 (possession 20)', closed: null,
+      season: [1,1,2,2,2,2,2,2,2,1,1,1], temp: [17,23], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'Big schools migrate north along the NSW coast through autumn and winter as the water cools, heading for the spawning grounds off southern Queensland. The leading edge of that run gives the best beach and headland fishing.',
+      baits: ['Ganged pilchard','Whole garfish','Whole mullet'], lures: ['40-85 g slices','Surface poppers','Shallow minnows','Large plastics'], where: 'Statewide' },
+    { n: 'Australian salmon', aka: 'sambo, black back', cat: 'b', min: null, max: null, bag: '5', closed: null,
+      season: [1,1,1,2,2,2,2,2,2,2,1,1], temp: [14,20], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'Cool-water schools push north up the coast as sea temperature drops from autumn — around Sydney from June, the Central Coast from July — peaking about September before withdrawing south again as summer warms the water.',
+      baits: ['Pilchard on gangs','Beach worm','Whitebait'], lures: ['30-60 g slugs','Surface stickbaits','100-125 mm plastics'], where: 'Statewide, heaviest south of Newcastle' },
+    { n: 'Rock blackfish', aka: 'black drummer, pig', cat: 'r', min: 30, max: null, bag: '10', closed: null,
+      season: [1,1,2,2,2,2,2,2,1,1,1,1], temp: [15,22], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'A resident of the wash that feeds hardest through autumn and winter when heavy swell churns the ledges and strips weed and cunje off the rock.',
+      baits: ['Cunjevoi','Peeled prawn','Bread','Sea cabbage'], lures: [], where: 'Statewide rocky headlands' },
+    { n: 'Eastern blue groper', aka: 'NSW state fish', cat: 'r', min: null, max: null, bag: 'NO-TAKE — release only', closed: 'Line fishing prohibited statewide, extended three years from 1 Mar 2025',
+      season: [1,1,1,1,1,1,1,1,1,1,1,1], temp: [16,23], tide: '—', time: 'All day',
+      run: 'A highly site-attached rocky-reef wrasse, present year round on inshore headlands and kelp. It is NSW’s state fish and is currently no-take — release any you hook.',
+      baits: [], lures: [], where: 'Statewide inshore reef', protected: true },
+    { n: 'Silver trevally', aka: 'trevally, blurter', cat: 'r', min: 30, max: null, bag: '10 (possession 20)', closed: null,
+      season: [1,1,1,2,2,2,2,2,2,1,1,1], temp: [15,22], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'Schools thicken on inshore reefs, breakwalls and harbour wharves through the cooler months from about May to September, rising readily in a berley trail.',
+      baits: ['Peeled prawn','Pilchard cubes','Squid strip','Beach worm'], lures: ['Small plastics','Blades & vibes','Micro jigs'], where: 'Statewide' },
+    { n: 'Australian bonito', aka: 'bonito, horse mackerel', cat: 'r', min: null, max: null, bag: '10', closed: null,
+      season: [2,2,2,2,2,1,0,0,1,1,1,2], temp: [18,24], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'Warm-current schools arrive with the EAC from late spring and hold tight along headlands and inshore reefs through summer and autumn, chasing bait within casting range of the rocks.',
+      baits: ['Live yellowtail','Pilchard on gangs','Garfish'], lures: ['20-40 g slugs','Trolled minnows','Stickbaits'], where: 'Statewide, best Sydney and south' },
+    { n: 'Snapper', aka: 'reddie, squire, knobby', cat: 'o', min: 30, max: null, bag: '10', closed: null,
+      season: [1,1,2,2,2,2,2,2,2,1,1,1], temp: [16,22], tide: 'Either — moving water', time: 'Dawn & dusk',
+      run: 'Moves in from the deeper reef onto inshore reefs and headlands as the water cools from autumn and aggregates to spawn through winter and early spring, with the big reds pushing very shallow at first and last light.',
+      baits: ['Fresh squid','Pilchard','Whole yellowtail','Octopus strip'], lures: ['5-7 in plastics','40-80 g micro jigs','Slow-pitch jigs'], where: 'Statewide' },
+    { n: 'Yellowtail kingfish', aka: 'kingie, hoodlum, rat', cat: 'o', min: 65, max: null, bag: '5', closed: null,
+      season: [2,2,2,2,1,1,1,1,2,2,2,2], temp: [18,24], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'Numbers build from spring as the EAC pushes warm water south, holding on inshore reefs, FADs, bommies and moorings through summer and autumn, with a resident winter population on the deep grounds.',
+      baits: ['Live squid','Live yellowtail','Live slimy mackerel','Live garfish'], lures: ['100-200 g knife jigs','Stickbaits','Large poppers'], where: 'Statewide, best Sydney, Port Stephens, south coast' },
+    { n: 'Sand flathead', aka: 'bluespotted flathead', cat: 'o', min: 33, max: null, bag: '10 combined, all flathead except dusky (possession 20)', closed: null,
+      season: [2,2,2,2,1,1,1,1,1,2,2,2], temp: [16,23], tide: 'Either — moving water', time: 'All day',
+      run: 'Sits on offshore and bay sand patches in about 20-60 m year round; catches lift through the warmer months as fish spread into shallower sand.',
+      baits: ['Squid strip','Pilchard','Whitebait'], lures: ['Plastics on 1/2-1 oz heads','Small jigs','Flasher rigs'], where: 'Statewide' },
+    { n: 'Leatherjacket', aka: 'jacket, chinaman', cat: 'o', min: null, max: null, bag: '20 combined, all leatherjackets', closed: null,
+      season: [1,1,1,2,2,2,2,2,2,1,1,1], temp: [15,23], tide: 'Either — moving water', time: 'All day',
+      run: 'Swarms on inshore and offshore reef year round, with the thickest schools over the cooler months when they mob a berley trail.',
+      baits: ['Squid strip','Peeled prawn','Pilchard cubes'], lures: ['Small jigs','Bait jigs'], where: 'Statewide' },
+    { n: 'Morwong', aka: 'rubberlip, jackass morwong', cat: 'o', min: 30, max: null, bag: '10 (red morwong 5)', closed: null,
+      season: [1,1,1,2,2,2,2,2,2,1,1,1], temp: [14,21], tide: 'Either — moving water', time: 'All day',
+      run: 'Territorial deep-reef resident taken all year in 30-100 m; catches improve through the cooler months when the pelagics thin out and boats work the broken ground.',
+      baits: ['Squid strip','Pilchard','Octopus'], lures: ['Plastics','Paternoster rigs'], where: 'Statewide' },
+    { n: 'Pearl perch', aka: 'pearlie', cat: 'o', min: 30, max: null, bag: '5', closed: null,
+      season: [1,1,2,2,2,2,2,2,1,1,1,1], temp: [18,24], tide: 'Either — moving water', time: 'Dawn & dusk',
+      run: 'Deep-reef schooling fish of northern NSW holding on isolated hard reef in 50-120 m, most consistent through autumn and winter when the swell drops enough to reach the wide grounds.',
+      baits: ['Fresh squid','Pilchard','Yellowtail fillet'], lures: ['Plastics','Slow-pitch jigs'], where: 'North from Port Stephens' },
+    { n: 'Teraglin', aka: 'trag, trag jew', cat: 'o', min: 38, max: null, bag: '5', closed: null,
+      season: [2,2,2,2,1,1,0,0,1,1,2,2], temp: [18,23], tide: 'Either — moving water', time: 'Night',
+      run: 'Gathers over deep reef and gravel in 50-90 m and feeds hard after dark, most reliably from November to April when they lift well up in the water column at dusk.',
+      baits: ['Fresh squid','Pilchard','Yellowtail strip'], lures: ['Plastics','Slow-pitch jigs'], where: 'Sydney to the mid north coast' },
+    { n: 'Mackerel tuna', aka: 'kawakawa, false albacore', cat: 'o', min: null, max: null, bag: '20 (general limit — not separately listed)', closed: null,
+      season: [2,2,2,2,2,1,0,0,0,1,1,2], temp: [21,27], tide: 'Either — moving water', time: 'Dawn & dusk',
+      run: 'Warm-current schools follow the EAC down the coast from late spring, busting up on baitfish just off the headlands through summer and autumn before retreating north as it cools.',
+      baits: ['Live yellowtail','Small live baits'], lures: ['20-40 g slugs','Small stickbaits','Trolled skirts'], where: 'North from Sydney' },
+    { n: 'Spanish mackerel', aka: 'Spaniard', cat: 'o', min: 75, max: null, bag: '5 combined with spotted mackerel', closed: null,
+      season: [2,2,2,2,1,0,0,0,0,1,1,2], temp: [22,28], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'Follows the warm EAC south after spawning, arriving on northern NSW headlands once the water passes about 22 °C in late spring and holding through summer and autumn.',
+      baits: ['Live slimy mackerel','Live pike','Whole garfish'], lures: ['Trolled bibless minnows','Large slugs','Skirted lures'], where: 'North from Coffs Harbour' },
+    { n: 'Spotted mackerel', aka: 'spotty, doggie', cat: 'o', min: 60, max: null, bag: '5 combined with Spanish mackerel', closed: null,
+      season: [2,2,2,2,1,0,0,0,0,0,1,2], temp: [22,28], tide: 'Run-in', time: 'Dawn & dusk',
+      run: 'Fast schools track the warm current into northern NSW over summer, hunting small baitfish right on the surface off headlands and river mouths.',
+      baits: ['Small live baits','Pilchard on gangs'], lures: ['20-40 g chrome slugs','Small trolled minnows'], where: 'North from Coffs Harbour' },
+    { n: 'Cobia', aka: 'black kingfish, crab-eater', cat: 'o', min: null, max: null, bag: '5', closed: null,
+      season: [2,2,2,2,1,0,0,0,0,1,2,2], temp: [22,28], tide: 'Either — moving water', time: 'All day',
+      run: 'A warm-water nomad that arrives with the summer current, shadowing rays, buoys, FADs and bait schools over inshore reef before heading back north as it cools.',
+      baits: ['Live yellowtail','Live pike','Whole squid'], lures: ['Large plastics','Big jigs','Surface poppers'], where: 'North from Sydney' },
+    { n: 'Mahi mahi', aka: 'dolphinfish, dollie', cat: 'o', min: 60, max: null, bag: '10, only 1 over 110 cm', closed: null,
+      season: [2,2,2,2,1,0,0,0,0,1,1,2], temp: [21,28], tide: '—', time: 'All day',
+      run: 'Rides warm EAC eddies down the coast from about December, packing onto the DPIRD FADs, current lines and floating debris through summer and autumn until the water drops below about 21 °C.',
+      baits: ['Pilchard','Live yellowtail','Fresh bonito strip'], lures: ['Small skirts','Stickbaits','Plastics','Poppers'], where: 'FADs from Merimbula to the Tweed' },
+    { n: 'Marlin', aka: 'black, blue & striped marlin', cat: 'o', min: null, max: null, bag: '1 of each species per day', closed: null,
+      season: [2,2,2,2,1,1,0,0,0,1,2,2], temp: [21,28], tide: '—', time: 'All day',
+      run: 'Billfish follow the EAC south from November — small blacks work inshore off Port Stephens and the south coast through summer, blues hold on the shelf January to April, and stripes peak on the canyons from February into autumn.',
+      baits: ['Live slimy mackerel','Live yellowtail','Swimming garfish'], lures: ['Skirted trolling lures','Large bibbed minnows'], where: 'Shelf and canyons statewide' },
+    { n: 'Southern bluefin tuna', aka: 'SBT, barrel', cat: 'o', min: null, max: null, bag: '1', closed: null,
+      season: [0,0,0,0,1,2,2,2,1,0,0,0], temp: [14,19], tide: '—', time: 'All day',
+      run: 'Cold-water schools push up onto the NSW shelf and canyons from the south each winter as sea temperature falls, peaking off the south coast and Sydney between June and September.',
+      baits: ['Pilchard cubes in a berley trail','Live slimy mackerel'], lures: ['Skirted lures','Deep divers','Metal jigs'], where: 'South coast to Sydney' },
+    { n: 'Yellowfin tuna', aka: 'yellowfin, ’fin', cat: 'o', min: null, max: null, bag: '5 combined under 90 cm, 2 combined at 90 cm+', closed: null,
+      season: [0,0,1,1,2,2,2,2,2,1,1,0], temp: [17,23], tide: '—', time: 'Dawn & dusk',
+      run: 'Moves onto the NSW shelf and canyons as the water cools from autumn, with the biggest fish taken on a cube trail off the south coast and Sydney between May and October.',
+      baits: ['Pilchard cubes','Live slimy mackerel'], lures: ['Skirted lures','Deep divers','Metal jigs'], where: 'Shelf statewide' },
+    { n: 'Albacore', aka: 'albie, longfin tuna', cat: 'o', min: null, max: null, bag: '5 combined under 90 cm, 2 combined at 90 cm+', closed: null,
+      season: [0,0,1,2,2,2,2,2,1,1,0,0], temp: [16,21], tide: '—', time: 'All day',
+      run: 'Cool-water schools work the shelf break and canyons through autumn and winter, usually the first tuna to hit the spread once the water drops into the high teens.',
+      baits: ['Pilchard cubes','Live slimy mackerel'], lures: ['Small skirts','Deep divers','Metal jigs'], where: 'Shelf statewide, best south' },
+    { n: 'Eastern rock lobster', aka: 'crayfish, cray', cat: 'o', min: 10.4, max: 18, bag: '3 combined, all rock lobsters (up from 2 on 1 Aug 2026)', closed: null,
+      season: [1,1,2,2,2,2,1,1,1,1,1,1], temp: [15,22], tide: 'Low slack', time: 'Night',
+      run: 'Shelters in reef ledges and caves year round and comes out to feed at night; catches peak through autumn and winter when the swell is manageable and the water is clear.',
+      baits: ['Mullet frames','Fish heads'], lures: [], where: 'Statewide rocky reef' },
+    { n: 'School shark', aka: 'tope, greyboy', cat: 'o', min: 91, max: null, bag: '5 combined shark group, only 1 tiger/mako/hammerhead', closed: null,
+      season: [1,1,2,2,2,2,2,2,1,1,1,1], temp: [13,19], tide: 'Either — moving water', time: 'Night',
+      run: 'A bottom-dwelling shark of the deeper southern shelf, taken year round over soft bottom in 40-120 m, most consistently over the cooler months and after dark.',
+      baits: ['Fresh squid','Salmon fillet','Tuna strip'], lures: [], where: 'South coast and Sydney' },
+    { n: 'Australian bass', aka: 'bass', cat: 'f', min: null, max: null, bag: '2 combined with estuary perch, only 1 over 35 cm in rivers', closed: '1 May – 31 Aug in rivers and estuaries (catch and release only); dams open all year',
+      season: [2,2,2,2,0,0,0,0,1,2,2,2], temp: [18,26], tide: '—', time: 'Dawn & dusk',
+      run: 'Mature fish run downstream out of the freshwater reaches into the brackish lower estuary to spawn over winter — the reason for the closure — then migrate back up into the snag country from September as the water warms.',
+      baits: ['Live shrimp','Scrub worms','Cicadas'], lures: ['Surface walkers','Small spinnerbaits','Shallow cranks','3 in plastics'], where: 'Coastal rivers and dams' },
+    { n: 'Murray cod', aka: 'cod, goodoo', cat: 'f', min: 55, max: 75, bag: '2 (possession 4)', closed: '1 Sep – 30 Nov in inland waters (Copeton and Blowering dams open all year)',
+      season: [2,2,2,1,1,1,1,1,0,0,0,2], temp: [18,24], tide: '—', time: 'Dawn & dusk',
+      run: 'Territorial ambush predator that feeds hardest on warming water right after the 1 December opening; the opening weeks and summer low-light periods produce the most fish.',
+      baits: ['Bardi grubs','Yabbies','Scrub worms'], lures: ['Spinnerbaits','Surface walkers','Swimbaits','Deep cranks'], where: 'Inland Murray-Darling rivers and dams' },
+    { n: 'Golden perch', aka: 'yellowbelly, callop', cat: 'f', min: 30, max: null, bag: '5 (possession 10)', closed: null,
+      season: [2,2,2,1,1,0,0,0,1,2,2,2], temp: [18,26], tide: '—', time: 'Dawn & dusk',
+      run: 'Moves upstream on rising, warming water in spring — flow plus water above about 20 °C triggers both the spawning migration and heavy feeding — and shuts down almost completely in the coldest months.',
+      baits: ['Yabbies','Scrub worms','Shrimp'], lures: ['Lipless cranks & vibes','Spinnerbaits','Blades'], where: 'Inland rivers and dams' },
+    { n: 'Trout (rainbow & brown)', aka: 'rainbow trout, brown trout', cat: 'f', min: 25, max: null, bag: '5 general waters, 2 in artificial-only waters, 1 in spawning streams', closed: 'Streams closed from the Tuesday after the June long weekend to the Friday before the October long weekend; dams open all year',
+      season: [1,1,2,2,2,1,0,0,0,2,2,2], temp: [8,17], tide: '—', time: 'Dawn & dusk',
+      run: 'Browns and rainbows run up the Snowy Mountains rivers out of the lakes to spawn from about April to June, triggered by rain-driven rises — which is why the streams close. Spring and autumn give the best stream fishing while the dams keep going all winter.',
+      baits: ['Scrub worms','Mudeyes','PowerBait where permitted'], lures: ['Bladed spinners','50-70 mm minnows','Soft plastic grubs','Wet & dry flies'], where: 'Snowy Mountains, New England, Central Tablelands' },
+    { n: 'Carp', aka: 'European carp, mud marlin', cat: 'f', min: null, max: null, bag: 'No limit — declared pest', closed: null,
+      season: [2,2,2,1,1,1,0,0,1,2,2,2], temp: [18,28], tide: '—', time: 'All day',
+      run: 'Becomes highly active and spawns in the shallow margins and flooded backwaters through spring and summer; rising, warming, turbid water brings the biggest congregations.',
+      baits: ['Corn kernels','Bread dough','Worms'], lures: ['Small plastics','Bread flies'], where: 'Inland and many coastal catchments', pest: true }
+  ];
+
+  /* ---------------- Statewide facts ------------------------------------- */
+  var RULES = {
+    asAt: 'September 2026',
+    fee: { d3: 7, m1: 14, y1: 35, y3: 85,
+      url: 'https://www.service.nsw.gov.au/services/recreational-fishing-licence',
+      who: 'Everyone fishing in NSW waters, salt or fresh, by any method — including bait collecting and prawn netting. Carry the receipt.',
+      exempt: ['Under 18', 'An adult helping someone under 18 with a single rod', 'Aboriginal people', 'Pensioner Concession Card (Centrelink or DVA)', 'Veteran Gold Card marked TPI or EDA', 'Private dams of 2 ha or less'] },
+    lifejacket: {
+      statewide: false, penalty: 100,
+      areas: ['Ballina Shire','Central Coast','Kiama','Lake Macquarie','Northern Beaches','Port Stephens','Randwick','Richmond Valley','Sutherland Shire','Wollongong'],
+      standard: 'Adults need AS 4758 level 50S or better; children under 12 need level 100 or better.',
+      url: 'https://www.nsw.gov.au/environment-land-and-water/coasts-waterways-and-marine/rock-fishing-lifejacket-law' },
+    general: [
+      'A daily bag limit of 20 applies to anything not listed in the official tables.',
+      'Possession limits count fish at home and in the freezer, not just what is on you.',
+      'For bream, tarwhine, flathead, tailor, luderick, trevally, bass, estuary perch and blue swimmer crab the possession limit is twice the daily bag.',
+      'All lobsters, crabs, bugs and crayfish carrying eggs must go back in the water.'
+    ],
+    noTake: ['Eastern blue groper (line fishing banned to about March 2028)','Wobbegong shark','Grey nurse shark','Black cod','Great white shark','Queensland groper','Seahorses, pipefish and seadragons','Trout cod, Macquarie perch, eastern freshwater cod'],
+    links: {
+      rules: 'https://www.dpird.nsw.gov.au/fishing/recreational/fishing-rules-and-regs/saltwater-bag-and-size-limits',
+      freshRules: 'https://www.dpird.nsw.gov.au/fishing/recreational/fishing-rules-and-regs/freshwater-bag-and-size-limits',
+      closures: 'https://www.dpird.nsw.gov.au/fishing/closures/general-closures',
+      map: 'https://fishsmart-map.alantgeo.com.au/',
+      report: 'tel:1800043536'
+    }
+  };
+
+  global.FishData = {
+    PORTS: PORTS, RADARS: RADARS, DISTRICTS: DISTRICTS,
+    SPOTS: SPOTS, SPECIES: SPECIES, RULES: RULES, KIND_NAME: KIND_NAME
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+if (typeof module !== 'undefined' && module.exports) module.exports = globalThis.FishData;
