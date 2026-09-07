@@ -1,0 +1,50 @@
+name: Live BOM feed
+
+# Station observations and radar frames, every ten minutes, force-pushed to a
+# single-commit `live` branch so the repository never grows. GitHub can run
+# scheduled jobs a few minutes late when it is busy.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-feed
+  cancel-in-progress: true
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install --quiet requests beautifulsoup4
+
+      - name: Fetch the current live branch
+        run: |
+          git clone -q --depth=1 --branch live "https://github.com/${{ github.repository }}.git" livedir 2>/dev/null || mkdir -p livedir
+          rm -rf livedir/.git
+
+      - name: Pull observations and radar frames
+        env:
+          LIVE_DIR: ${{ github.workspace }}/livedir
+        run: python scripts/fetch_live.py
+
+      - name: Publish as a single commit
+        run: |
+          cd livedir
+          git init -q
+          git config user.name  "bom-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b live
+          git add -A
+          git commit -q -m "live $(date -u +'%Y-%m-%d %H:%M UTC')" || { echo "nothing to publish"; exit 0; }
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" live
