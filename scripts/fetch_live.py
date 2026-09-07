@@ -27,7 +27,7 @@ UAS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",
 ]
 RADARS = ["IDR713", "IDR033", "IDR043", "IDR403", "IDR283", "IDR553", "IDR693", "IDR963"]
-KEEP_FRAMES = 6
+KEEP_FRAMES = 8
 MAX_STATION_LOOKUPS = 25
 
 S = requests.Session()
@@ -102,23 +102,16 @@ def fetch_obs(stations):
     soup = BeautifulSoup(html, "html.parser")
     now = dt.datetime.now(TZ)
     out, looked_up = [], 0
+    # The all-stations table has a two-row header (grouped "Wind" / "Highest
+    # Wind Gust" cells), so header-name matching is unreliable. The data cells
+    # after the station name are in a fixed order:
+    #   0 date/time  1 temp  2 app temp  3 dew pt  4 rel hum  5 delta-T
+    #   6 wind dir   7 spd km/h  8 gust km/h  9 spd kts  10 gust kts
+    #   11 pressure  12 rain since 9am  13 low temp  14 high temp
+    #   15 gust dir  16 gust km/h+time  17 gust kts+time
     for table in soup.find_all("table"):
-        heads = [h.get_text(" ", strip=True).lower() for h in table.find_all("th")
-                 if h.find_parent("thead") is not None]
-        if not heads or not any("wind" in h for h in heads):
+        if "obs_table" not in (table.get("class") or []) and not table.find("a", href=re.compile(r"IDN60801\.\d+")):
             continue
-
-        def col(*names):
-            # earlier names win outright, so "gust kts" beats plain "gust"
-            for n in names:
-                for i, h in enumerate(heads):
-                    if n in h:
-                        return i
-            return None
-
-        c_time, c_temp = col("date/time", "date"), col("temp")
-        c_dir, c_kts, c_gust = col("wind dir", "dir"), col("spd kts", "kts"), col("gust kts", "gust")
-        c_press, c_rain = col("press"), col("rain")
         body = table.find("tbody") or table
         for tr in body.find_all("tr"):
             th = tr.find("th")
@@ -129,13 +122,23 @@ def fetch_obs(stations):
             if not m:
                 continue
             sid, name = m.group(1), a.get_text(" ", strip=True)
-            cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
-            # header includes the station column; data cells do not
-            off = 1 if heads and "station" in heads[0] else 0
+            c = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+            if len(c) < 13:
+                continue
 
             def cell(i):
-                j = None if i is None else i - off
-                return cells[j] if j is not None and 0 <= j < len(cells) else ""
+                return c[i] if 0 <= i < len(c) else ""
+
+            press = num(cell(11))
+            if press is not None and not (900 <= press <= 1100):
+                # layout shifted — look for the pressure-shaped cell nearby
+                for j in range(8, min(15, len(c))):
+                    v = num(c[j])
+                    if v is not None and 900 <= v <= 1100 and re.match(r"^\d{3,4}\.\d$", c[j]):
+                        press = v
+                        break
+                else:
+                    press = None
 
             st = stations.get(sid)
             if st is None and looked_up < MAX_STATION_LOOKUPS:
@@ -145,37 +148,66 @@ def fetch_obs(stations):
                     d0 = j["observations"]["data"][0]
                     st = {"lat": d0.get("lat"), "lon": d0.get("lon"), "name": d0.get("name") or name}
                     stations[sid] = st
-                    time.sleep(0.4)
+                    time.sleep(0.6)
                 except Exception as e:
                     print(f"  station {sid}: {e}", file=sys.stderr)
                     stations[sid] = {"lat": None, "lon": None, "name": name}
                     st = stations[sid]
             if st is None:
                 continue
-            dtxt = cell(c_dir).upper()
+            dtxt = cell(6).upper()
             out.append({
                 "id": sid, "name": name,
                 "lat": st.get("lat"), "lon": st.get("lon"),
-                "time": parse_time(cell(c_time), now),
-                "temp": num(cell(c_temp)),
+                "time": parse_time(cell(0), now),
+                "temp": num(cell(1)),
                 "windDirText": dtxt if dtxt in DIRS or dtxt == "CALM" else None,
                 "windDir": DIRS.get(dtxt),
-                "windKt": 0.0 if dtxt == "CALM" else num(cell(c_kts)),
-                "gustKt": num(cell(c_gust)),
-                "pressure": num(cell(c_press)),
-                "rain": num(cell(c_rain)),
+                "windKt": 0.0 if dtxt == "CALM" else num(cell(9)),
+                "gustKt": num(cell(10)),
+                "pressure": press,
+                "rain": num(cell(12)),
             })
     return out
 
 
 # ------------------------------------------------------------------- radar
-def fetch_radar(rid):
-    html = get(f"https://www.bom.gov.au/products/{rid}.loop.shtml")
-    names = re.findall(r'theImageNames\[\d+\]\s*=\s*"([^"]+)"', html)
-    names = [n for n in names if rid in n]
+# BOM retired the HTML loop pages in 2026, but the anonymous FTP server still
+# lists and serves every radar frame, and the HTTP mirror of the same files
+# still works for the ones we can name. FTP first, HTTP as the fallback.
+import ftplib
+import io
+
+_ftp = None
+
+
+def ftp():
+    global _ftp
+    if _ftp is None:
+        _ftp = ftplib.FTP("ftp.bom.gov.au", timeout=60)
+        _ftp.login()  # anonymous
+    return _ftp
+
+
+def ftp_list_radar():
+    try:
+        names = ftp().nlst("/anon/gen/radar/")
+        return [os.path.basename(n) for n in names]
+    except Exception as e:
+        print(f"  ftp list: {e}", file=sys.stderr)
+        return []
+
+
+def ftp_get(remote):
+    buf = io.BytesIO()
+    ftp().retrbinary("RETR " + remote, buf.write)
+    return buf.getvalue()
+
+
+def fetch_radar(rid, listing):
+    names = sorted(n for n in listing if n.startswith(rid + ".T.") and n.endswith(".png"))[-KEEP_FRAMES:]
     if not names:
-        raise RuntimeError("no frame list on loop page")
-    names = sorted(set(names))[-KEEP_FRAMES:]
+        raise RuntimeError("no frames in the FTP listing")
     d = os.path.join(LIVE, "radar", rid)
     os.makedirs(d, exist_ok=True)
     layers = {}
@@ -183,28 +215,35 @@ def fetch_radar(rid):
         fn = f"{rid}.{layer}.png"
         path = os.path.join(d, fn)
         if not os.path.exists(path):
-            try:
-                blob = get(f"https://www.bom.gov.au/products/radar_transparencies/{fn}", binary=True)
-                with open(path, "wb") as f:
-                    f.write(blob)
-                time.sleep(0.3)
-            except Exception as e:
-                print(f"  {rid} {layer}: {e}", file=sys.stderr)
+            blob = None
+            for fetcher in (lambda: ftp_get(f"/anon/gen/radar_transparencies/{fn}"),
+                            lambda: get(f"https://www.bom.gov.au/products/radar_transparencies/{fn}", binary=True)):
+                try:
+                    blob = fetcher()
+                    break
+                except Exception as e:
+                    print(f"  {rid} {layer}: {e}", file=sys.stderr)
+            if not blob:
                 continue
+            with open(path, "wb") as f:
+                f.write(blob)
         layers[layer.split(".")[0]] = f"radar/{rid}/{fn}"
     frames = []
-    for n in names:
-        fn = os.path.basename(n)
+    for fn in names:
         path = os.path.join(d, fn)
         if not os.path.exists(path):
-            try:
-                blob = get("https://www.bom.gov.au" + n, binary=True)
-                with open(path, "wb") as f:
-                    f.write(blob)
-                time.sleep(0.3)
-            except Exception as e:
-                print(f"  {rid} {fn}: {e}", file=sys.stderr)
+            blob = None
+            for fetcher in (lambda: ftp_get(f"/anon/gen/radar/{fn}"),
+                            lambda: get(f"https://www.bom.gov.au/radar/{fn}", binary=True)):
+                try:
+                    blob = fetcher()
+                    break
+                except Exception as e:
+                    print(f"  {rid} {fn}: {e}", file=sys.stderr)
+            if not blob:
                 continue
+            with open(path, "wb") as f:
+                f.write(blob)
         m = re.search(r"\.T\.(\d{12})\.png$", fn)
         ts = int(dt.datetime.strptime(m.group(1), "%Y%m%d%H%M").replace(tzinfo=dt.timezone.utc).timestamp()) if m else None
         frames.append({"time": ts, "file": f"radar/{rid}/{fn}"})
@@ -233,9 +272,11 @@ def main():
 
     radar = jload(os.path.join(LIVE, "radar.json"), {"radars": {}})
     radar.setdefault("radars", {})
+    listing = ftp_list_radar()
+    print(f"ftp radar listing: {len(listing)} files")
     for rid in RADARS:
         try:
-            radar["radars"][rid] = fetch_radar(rid)
+            radar["radars"][rid] = fetch_radar(rid, listing)
             print(f"radar {rid}: {len(radar['radars'][rid]['frames'])} frames")
         except Exception as e:
             print(f"radar {rid} failed: {e}", file=sys.stderr)
