@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<title>Dawson's Fish Finder Pro</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="description" content="Dawson's Fish Finder Pro — wind, weather, swell, radar, tides, moon feeding times and NSW fish seasons in one place.">
+<meta name="theme-color" content="#060f16" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f7f9" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fish Finder">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <button class="spotbtn" id="spotBtn">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent);flex:none">
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
+    </svg>
+    <span class="col">
+      <span class="sname" id="spotName">Loading…</span><br>
+      <span class="sreg" id="spotRegion">&nbsp;</span>
+    </span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--ink3);flex:none"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <button class="iconbtn" id="gpsBtn" aria-label="Use my location">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
+  </button>
+  <button class="iconbtn" id="refreshBtn" aria-label="Refresh">
+    <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+  </button>
+</header>
+
+<main>
+  <div id="alerts"></div>
+
+  <!-- ============ NOW ============ -->
+  <section class="view on" id="v-now">
+    <div class="card" id="heroCard">
+      <div class="hero">
+        <div class="dial" id="dial"></div>
+        <div style="min-width:0">
+          <div class="verdict" id="verdict">Checking conditions…</div>
+          <div class="sub" id="verdictSub">&nbsp;</div>
+          <div class="chips" id="reasonChips"></div>
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="factors" id="factors"></div>
+      <div class="muted" id="scoreFoot" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h2>Right now</h2>
+      <div class="grid" id="nowGrid"></div>
+    </div>
+
+    <div class="card" id="tideNowCard">
+      <h2>Tide</h2>
+      <div id="tideNow"></div>
+    </div>
+
+    <div class="card">
+      <h2>Sun &amp; moon</h2>
+      <div id="sunMoon"></div>
+    </div>
+
+    <div class="card">
+      <h2>Best windows — next 7 days</h2>
+      <div class="wlist" id="windows"></div>
+    </div>
+
+    <div class="card" id="bomCard" style="display:none">
+      <h2>BOM coastal waters forecast</h2>
+      <div id="bomText" style="font-size:14px;line-height:1.5"></div>
+      <div class="muted" id="bomMeta" style="margin-top:8px"></div>
+    </div>
+  </section>
+
+  <!-- ============ FORECAST ============ -->
+  <section class="view" id="v-forecast">
+    <div class="card">
+      <h2>Bite score — next 7 days</h2>
+      <div id="scoreChart"></div>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>Bite score</span>
+        <span><i style="background:var(--ink3)"></i>Wind (kt)</span>
+        <span><i style="background:color-mix(in srgb,var(--ink) 12%,transparent)"></i>Night</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Next 48 hours</h2>
+      <div class="strip" id="hourStrip"></div>
+    </div>
+    <div class="card">
+      <h2>7 days</h2>
+      <div id="dayList"></div>
+    </div>
+    <div class="card" id="marineCard">
+      <h2>Swell &amp; sea</h2>
+      <div class="grid" id="marineGrid"></div>
+      <div id="swellChart" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <!-- ============ TIDES ============ -->
+  <section class="view" id="v-tides">
+    <div class="card tight">
+      <div class="strip" id="tideDays" style="gap:6px"></div>
+    </div>
+    <div class="card">
+      <h2 id="tideTitle">Tide</h2>
+      <div id="tideChart"></div>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>Tide height</span>
+        <span><i style="background:color-mix(in srgb,var(--accent2) 45%,transparent)"></i>Moon feeding period</span>
+        <span><i style="background:color-mix(in srgb,var(--ink) 12%,transparent)"></i>Night</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Highs &amp; lows</h2>
+      <table class="tt" id="tideTable"></table>
+      <div class="muted" id="tideSource" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <h2>Moon feeding times</h2>
+      <div id="solunarList"></div>
+    </div>
+  </section>
+
+  <!-- ============ MAPS ============ -->
+  <section class="view" id="v-maps">
+    <div class="card tight">
+      <div class="seg" id="mapSeg">
+        <button data-m="radar" class="on">Rain radar</button>
+        <button data-m="wind">Wind</button>
+        <button data-m="waves">Swell</button>
+      </div>
+    </div>
+    <div class="card" id="radarPane">
+      <div class="mm" id="map"></div>
+      <div class="mapbar">
+        <button class="iconbtn" id="playBtn" aria-label="Play">
+          <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <input type="range" class="scrub" id="scrub" min="0" max="0" value="0">
+        <span class="maptime" id="mapTime">—</span>
+      </div>
+      <div class="radar-legend" id="radarLegend"></div>
+      <div class="mapbar" style="margin-top:10px">
+        <div class="seg" id="baseSeg" style="flex:1">
+          <button data-b="map" class="on">Map</button>
+          <button data-b="satellite">Satellite</button>
+          <button data-b="ocean">Nautical</button>
+        </div>
+      </div>
+      <div class="mapattr" id="mapAttr"></div>
+    </div>
+    <div class="card" id="windPane" style="display:none">
+      <iframe class="windy" id="windyFrame" title="Wind map" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      <div class="mapattr">Animated wind and rain layers by Windy.com.</div>
+    </div>
+    <div class="card" id="wavePane" style="display:none">
+      <iframe class="windy" id="waveFrame" title="Swell map" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      <div class="mapattr">Wave and swell layers by Windy.com.</div>
+    </div>
+    <div class="card">
+      <h2>Straight to BOM</h2>
+      <div class="linkrow" id="bomLinks"></div>
+    </div>
+  </section>
+
+  <!-- ============ FISH ============ -->
+  <section class="view" id="v-fish">
+    <div class="searchbar">
+      <input type="text" id="fishSearch" placeholder="Search species, bait or lure" autocomplete="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="chips" id="fishFilters" style="margin-bottom:10px"></div>
+    <div class="card" id="fishList"></div>
+    <div class="card">
+      <h2>Before you go</h2>
+      <div class="linkrow" id="ruleLinks"></div>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section class="view" id="v-me">
+    <div class="card">
+      <h2>Who's fishing</h2>
+      <div class="field">
+        <label for="setName">Name</label>
+        <input type="text" id="setName" placeholder="Dad" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>How you'll fish today</label>
+        <div class="seg" id="accessSeg">
+          <button data-a="land">Land based</button>
+          <button data-a="boat">In the boat</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Open on my location</label>
+        <div class="seg" id="gpsSeg">
+          <button data-g="1">Use GPS</button>
+          <button data-g="0">Saved spot</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>What you're chasing</h2>
+      <div class="muted" style="margin-bottom:8px">The bite score weighs tide, water temp and season against your first pick.</div>
+      <div class="chips" id="speciesPick"></div>
+    </div>
+
+    <div class="card">
+      <h2>Your limits</h2>
+      <div class="field">
+        <label>Wind you'll put up with — <b id="windLimVal">20</b> kt</label>
+        <input type="range" id="windLim" min="8" max="35" step="1">
+      </div>
+      <div class="field">
+        <label>Swell you'll put up with — <b id="swellLimVal">2.0</b> m</label>
+        <input type="range" id="swellLim" min="0.5" max="4" step="0.1">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Catch log</h2>
+      <button class="btn ghost" id="addCatchBtn">Log a catch</button>
+      <div id="logList" style="margin-top:12px"></div>
+      <div id="logInsight"></div>
+    </div>
+
+    <div class="card">
+      <h2>Data &amp; display</h2>
+      <div class="field">
+        <label>Forecast model</label>
+        <div class="seg" id="modelSeg">
+          <button data-md="bom_access_global">BOM ACCESS-G</button>
+          <button data-md="best_match">Best available</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Theme</label>
+        <div class="seg" id="themeSeg">
+          <button data-t="auto">Auto</button>
+          <button data-t="light">Light</button>
+          <button data-t="dark">Dark</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>About</h2>
+      <div class="footnote" id="about"></div>
+    </div>
+  </section>
+</main>
+
+<button class="fab" id="fab">+ Log a catch</button>
+
+<nav class="tabbar" id="tabs">
+  <button data-v="now" class="on"><svg viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>Now</span></button>
+  <button data-v="forecast"><svg viewBox="0 0 24 24"><path d="M17 17.5a4 4 0 0 0-.8-7.9 6 6 0 0 0-11.4 2A3.5 3.5 0 0 0 5.5 18Z"/><path d="M8 21l1-2M12 21l1-2M16 21l1-2"/></svg><span>Forecast</span></button>
+  <button data-v="tides"><svg viewBox="0 0 24 24"><path d="M2 8c2.5-2.5 5-2.5 7.5 0S15 10.5 17.5 8 22 5.5 22 5.5"/><path d="M2 14c2.5-2.5 5-2.5 7.5 0s5 2.5 7.5 0 4.5-2.5 4.5-2.5"/><path d="M2 20c2.5-2.5 5-2.5 7.5 0"/></svg><span>Tides</span></button>
+  <button data-v="maps"><svg viewBox="0 0 24 24"><path d="m9 4-6 3v13l6-3 6 3 6-3V4l-6 3z"/><path d="M9 4v13M15 7v13"/></svg><span>Maps</span></button>
+  <button data-v="fish"><svg viewBox="0 0 24 24"><path d="M6 12c3-5 9-6 13 0-4 6-10 5-13 0Z"/><path d="m19 12 3-3v6z"/><circle cx="9.5" cy="11" r=".6" fill="currentColor"/></svg><span>Fish</span></button>
+</nav>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet"><button class="sheetclose" id="sheetClose" aria-label="Close">×</button><div class="grab"></div><div id="sheetBody"></div></div>
+
+<script src="./js/astro.js"></script>
+<script src="./js/data.js"></script>
+<script src="./js/core.js"></script>
+<script src="./js/map.js"></script>
+<script src="./js/app.js"></script>
+</body>
+</html>
