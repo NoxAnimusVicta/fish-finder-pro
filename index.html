@@ -62,6 +62,11 @@
       <div class="grid" id="nowGrid"></div>
     </div>
 
+    <div class="card" id="stationCard" style="display:none">
+      <h2>Actual reading — nearest BOM station</h2>
+      <div id="stationBody"></div>
+    </div>
+
     <div class="card" id="tideNowCard">
       <h2>Tide</h2>
       <div id="tideNow"></div>
@@ -86,6 +91,11 @@
 
   <!-- ============ FORECAST ============ -->
   <section class="view" id="v-forecast">
+    <div class="card">
+      <h2>Temperature — next 7 days</h2>
+      <div id="tempChart"></div>
+      <div class="muted" id="tempFoot" style="margin-top:8px"></div>
+    </div>
     <div class="card">
       <h2>Bite score — next 7 days</h2>
       <div id="scoreChart"></div>
@@ -145,6 +155,25 @@
       </div>
     </div>
     <div class="card" id="radarPane">
+      <div class="seg" id="radarSrc" style="margin-bottom:10px">
+        <button data-rs="bom" class="on">BOM radar</button>
+        <button data-rs="rv">Map view</button>
+      </div>
+      <div id="bomPane">
+        <div class="bomstage" id="bomStage"></div>
+        <div class="mapbar">
+          <button class="iconbtn" id="bomPlay" aria-label="Play">
+            <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor" stroke="none"/></svg>
+          </button>
+          <input type="range" class="scrub" id="bomScrub" min="0" max="0" value="0">
+          <span class="maptime" id="bomTime">—</span>
+        </div>
+        <div class="mapbar" style="margin-top:10px">
+          <select id="bomRadarPick" style="flex:1;padding:10px 12px;border-radius:13px;border:1px solid var(--line);background:var(--card)"></select>
+        </div>
+        <div class="mapattr" id="bomMeta"></div>
+      </div>
+      <div id="rvPane" style="display:none">
       <div class="mm" id="map"></div>
       <div class="mapbar">
         <button class="iconbtn" id="playBtn" aria-label="Play">
@@ -162,6 +191,7 @@
         </div>
       </div>
       <div class="mapattr" id="mapAttr"></div>
+      </div>
     </div>
     <div class="card" id="windPane" style="display:none">
       <iframe class="windy" id="windyFrame" title="Wind map" loading="lazy" referrerpolicy="no-referrer"></iframe>
@@ -229,6 +259,21 @@
       <div class="field">
         <label>Swell you'll put up with — <b id="swellLimVal">2.0</b> m</label>
         <input type="range" id="swellLim" min="0.5" max="4" step="0.1">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Tune the score</h2>
+      <div class="muted" style="margin-bottom:10px">Each factor's pull on the bite score. ×1.00 is the default; drag anything you rate more or less than the app does.</div>
+      <div id="weightList"></div>
+      <button class="btn ghost" id="resetWeights">Back to defaults</button>
+      <div class="field" style="margin-top:14px">
+        <label>Learn from my catch log</label>
+        <div class="seg" id="learnSeg">
+          <button data-l="1">On</button>
+          <button data-l="0">Off</button>
+        </div>
+        <div class="muted" id="learnNote" style="margin-top:8px"></div>
       </div>
     </div>
 

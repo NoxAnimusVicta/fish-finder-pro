@@ -20,11 +20,13 @@ to the iPhone home screen, where it runs full screen like a native app.
 4. **Add it to the home screen.** Open that URL in **Safari** on the iPhone →
    the Share button → **Add to Home Screen** → Add. It must be Safari; Chrome
    on iOS can't install home-screen apps.
-5. **Switch on the BOM updater.** *Actions* tab → *I understand my workflows,
-   go ahead and enable them* → pick **Update BOM data** → *Run workflow*. That
-   pulls BOM's coastal waters forecasts, marine warnings and official tide
-   predictions into `data/`, and then repeats every two hours. The app works
-   without it — it just falls back to model tides and skips the BOM text.
+5. **Switch on the BOM updaters.** *Settings → Actions → General → Workflow
+   permissions → Read and write*. Then the *Actions* tab → enable workflows →
+   run **Update BOM data** once (coastal waters forecasts, warnings and
+   official tide predictions into `data/`, then every two hours) and **Live
+   BOM feed** once (station observations and radar frames onto a `live`
+   branch, then every ten minutes). The app works without either — it falls
+   back to model tides, skips the BOM text and uses the map radar.
 
 To change anything later, edit the file on GitHub and commit; the site updates
 within a minute. On the phone, close and reopen the app to pick it up.
@@ -36,11 +38,28 @@ within a minute. On the phone, close and reopen the app to pick it up.
 | **Now** | Bite score 0–100 with the reasoning shown, current wind/swell/water temp/barometer, next tide, sun and moon, and the best windows over the next week |
 | **Forecast** | Bite score charted across seven days, 48-hour strip, daily outlook, swell and sea state |
 | **Tides** | Tide curve per day with highs and lows, night shading, moon feeding periods |
-| **Maps** | Animated rain radar, Windy wind and swell layers, one-tap links to the right BOM radar and warnings for where you are |
+| **Maps** | Live BOM radar loop for the nearest site with a you-are-here dot, a map-based radar, Windy wind and swell layers, one-tap links to BOM warnings |
 | **Fish** | 40 NSW species with season bars, run and migration notes, current legal sizes and bag limits, baits and lures |
 
 Settings hold your name, land-or-boat, target species, wind and swell limits,
 and the catch log. Everything stays on the phone.
+
+### What makes it more accurate than a plain forecast
+
+- **Real readings, not just the model.** The nearest BOM weather station's
+  latest wind, gust, pressure and temperature are shown next to the model,
+  and the next six hours of the forecast are nudged toward what the station
+  is actually reading, with the nudge fading out so a stale reading cannot
+  poison tomorrow.
+- **Confidence.** BOM's own 18-member ensemble is pulled alongside the
+  forecast. Where the members disagree on the wind, the windows and the
+  seven-day list say so.
+- **Local exposure.** Every spot knows which way it faces, so a westerly at
+  Callala Bay counts as offshore and flattening, while at Currarong it is
+  side-shore — the same wind scores differently at spots ten minutes apart.
+- **His weights.** Every factor's pull on the score can be tuned in Settings,
+  and once there are six or more logged catches the app starts learning which
+  factors actually produce for him.
 
 ### The bite score
 
@@ -89,8 +108,10 @@ js/map.js                  the slippy map (no libraries)
 js/app.js                  screens, charts, glue
 sw.js                      offline cache — bump CACHE after edits
 manifest.webmanifest       home-screen install metadata
-scripts/fetch_bom.py       what the GitHub Action runs
-.github/workflows/bom.yml  the two-hourly BOM update
+scripts/fetch_bom.py       two-hourly forecasts, warnings, tides
+scripts/fetch_live.py      ten-minute observations and radar frames
+.github/workflows/bom.yml  runs fetch_bom.py, commits to data/
+.github/workflows/live.yml runs fetch_live.py, force-pushes the live branch
 data/                      what the Action writes
 test/                      offline browser test — python3 test/run.py
 ```
