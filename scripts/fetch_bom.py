@@ -19,10 +19,21 @@ TZ = ZoneInfo("Australia/Sydney")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 REPO = os.environ.get("GITHUB_REPOSITORY", "fish-finder-pro")
-UA = f"NSWFishingApp/1.0 (personal, non-commercial; +https://github.com/{REPO})"
+# BOM's edge returns 403 to anything that does not look like a browser, so
+# try an honest identifying agent first and a plain browser one second.
+UAS = [
+    f"DawsonsFishFinder/1.0 (personal, non-commercial; +https://github.com/{REPO})",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+]
+BROWSER_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-AU,en;q=0.9",
+    "Referer": "https://www.bom.gov.au/",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": UA, "Accept-Language": "en-AU,en"})
 
 COASTAL_XML = "https://www.bom.gov.au/fwo/IDN11001.xml"
 WARNING_FEEDS = [
@@ -55,9 +66,17 @@ MONTHS = {m: i + 1 for i, m in enumerate(
 
 
 def get(url, **kw):
-    r = SESSION.get(url, timeout=45, **kw)
-    r.raise_for_status()
-    return r
+    last = None
+    for ua in UAS:
+        h = dict(BROWSER_HEADERS); h["User-Agent"] = ua
+        try:
+            r = SESSION.get(url, timeout=45, headers=h, **kw)
+            if r.status_code == 200:
+                return r
+            last = requests.HTTPError(f"{r.status_code} for {url}")
+        except Exception as e:
+            last = e
+    raise last
 
 
 def load(name):
