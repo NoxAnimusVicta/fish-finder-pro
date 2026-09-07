@@ -28,7 +28,7 @@ UAS = [
 ]
 RADARS = ["IDR713", "IDR033", "IDR043", "IDR403", "IDR283", "IDR553", "IDR693", "IDR963"]
 KEEP_FRAMES = 8
-MAX_STATION_LOOKUPS = 25
+MAX_STATION_LOOKUPS = 80
 
 S = requests.Session()
 
@@ -148,7 +148,7 @@ def fetch_obs(stations):
                     d0 = j["observations"]["data"][0]
                     st = {"lat": d0.get("lat"), "lon": d0.get("lon"), "name": d0.get("name") or name}
                     stations[sid] = st
-                    time.sleep(0.6)
+                    time.sleep(0.4)
                 except Exception as e:
                     print(f"  station {sid}: {e}", file=sys.stderr)
                     stations[sid] = {"lat": None, "lon": None, "name": name}
