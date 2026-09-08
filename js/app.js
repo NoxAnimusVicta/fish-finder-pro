@@ -152,7 +152,7 @@
       if (b.classList.contains('on') && el('v-' + b.dataset.v).classList.contains('on')) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
       C.Store._set('nf.tab', b.dataset.v);
       Array.prototype.forEach.call(tabs.children, function (x) { x.classList.toggle('on', x === b); });
-      ['now', 'forecast', 'tides', 'maps', 'fish', 'me'].forEach(function (v) {
+      ['now', 'forecast', 'tides', 'maps', 'fish', 'lb', 'me'].forEach(function (v) {
         var node = el('v-' + v); if (node) node.classList.toggle('on', v === b.dataset.v);
       });
       el('fab').style.display = b.dataset.v === 'now' ? '' : 'none';
@@ -168,7 +168,7 @@
     var b = document.querySelector('#tabs button[data-v="' + v + '"]');
     if (b) b.click();
     else {
-      ['now', 'forecast', 'tides', 'maps', 'fish', 'me'].forEach(function (x) {
+      ['now', 'forecast', 'tides', 'maps', 'fish', 'lb', 'me'].forEach(function (x) {
         el('v-' + x).classList.toggle('on', x === v);
       });
       Array.prototype.forEach.call(el('tabs').children, function (x) { x.classList.remove('on'); });
