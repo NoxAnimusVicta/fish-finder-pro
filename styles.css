@@ -409,3 +409,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 html.big body { zoom: 1.14; }
 .day.tap { cursor: pointer; }
 .day.tap:active { background: var(--card2); }
+
+.best { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); width: 100%; text-align: left; }
+.best:last-child { border-bottom: 0; }
+.best .bn { font-weight: 640; font-size: 15px; }
+.best .bm { font-size: 12px; color: var(--ink3); }
+.best .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--card2); overflow: hidden; }
+.best .bar i { display: block; height: 100%; border-radius: 3px; }
+.best .pill { min-width: 38px; }
+#kindSeg button { font-size: 12.5px; padding: 8px 4px; }

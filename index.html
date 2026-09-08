@@ -57,6 +57,8 @@
           <div class="chips" id="reasonChips"></div>
         </div>
       </div>
+      <div class="seg" id="kindSeg" style="display:none;margin-top:12px"></div>
+      <div class="muted" id="bestBet" style="margin-top:10px;display:none"></div>
       <div class="sep"></div>
       <div class="factors" id="factors"></div>
       <div class="muted" id="scoreFoot" style="margin-top:10px"></div>
@@ -70,6 +72,12 @@
     <div class="card">
       <h2>Right now</h2>
       <div class="grid" id="nowGrid"><div class="cell"><div class="skel" style="width:40%"></div><div class="skel" style="width:70%;margin-top:8px;height:20px"></div></div><div class="cell"><div class="skel" style="width:40%"></div><div class="skel" style="width:60%;margin-top:8px;height:20px"></div></div><div class="cell"><div class="skel" style="width:40%"></div><div class="skel" style="width:65%;margin-top:8px;height:20px"></div></div></div>
+    </div>
+
+    <div class="card" id="baroCard" style="display:none">
+      <h2>Barometer — yesterday to tomorrow</h2>
+      <div id="baroChart"></div>
+      <div class="muted" id="baroNote" style="margin-top:6px"></div>
     </div>
 
     <div class="card" id="stationCard" style="display:none">
@@ -235,6 +243,10 @@
       <input type="text" id="fishSearch" placeholder="Search species, bait or lure" autocomplete="off" autocorrect="off" spellcheck="false">
     </div>
     <div class="chips" id="fishFilters" style="margin-bottom:10px"></div>
+    <div class="card" id="bestCard" style="display:none">
+      <h2 id="bestTitle">Best bets right now</h2>
+      <div id="bestList"></div>
+    </div>
     <div class="card" id="fishList"></div>
     <div class="card">
       <h2>Before you go</h2>
@@ -352,7 +364,11 @@
     <div class="card">
       <h2>About</h2>
       <div class="footnote" id="about"></div>
-      <button class="btn ghost small" id="wipeBtn" style="margin-top:12px">Start fresh — wipe settings and log</button>
+      <div class="row" style="margin-top:12px;gap:8px">
+        <button class="btn ghost small" id="backupBtn">Back up settings &amp; log</button>
+        <button class="btn ghost small" id="restoreBtn">Restore a backup</button>
+      </div>
+      <button class="btn ghost small" id="wipeBtn" style="margin-top:10px">Start fresh — wipe settings and log</button>
     </div>
   </section>
 </main>

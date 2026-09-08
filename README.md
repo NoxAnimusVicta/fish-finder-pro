@@ -44,6 +44,13 @@ within a minute. On the phone, close and reopen the app to pick it up.
 Settings hold your name, land-or-boat, target species, wind and swell limits,
 and the catch log. Everything stays on the phone.
 
+Day-to-day extras: favourite and recent spots, notes per spot, a four-week
+moon-and-tide planner, "best bets" (every species scored for the water you
+are on, now and over the next 24 hours), a barometer trace from yesterday to
+tomorrow, one-tap sharing of the conditions or the catch log as CSV, blank
+sessions and a daily bag tally in the log, a backup/restore of everything on
+the phone, pull-to-refresh, and a larger-text option.
+
 ### What makes it more accurate than a plain forecast
 
 - **Real readings, not just the model.** The nearest BOM weather station's
@@ -59,7 +66,17 @@ and the catch log. Everything stays on the phone.
   side-shore — the same wind scores differently at spots ten minutes apart.
 - **His weights.** Every factor's pull on the score can be tuned in Settings,
   and once there are six or more logged catches the app starts learning which
-  factors actually produce for him.
+  factors actually produce for him — measured against what each factor
+  typically reads at that spot that week (and against his blank sessions once
+  he has logged a few), so a factor that is always high never gets credit for
+  nothing.
+- **Tested.** `sim/run_sims.js` checks sunrise/sunset against the NOAA solar
+  calculator (within 0.1 min), moon phase against Meeus' lunar-phase instants,
+  the tide-model extraction against an analytic harmonic tide (median timing
+  error 2 min), 4,000 Monte Carlo score runs for range and monotonicity, the
+  window builder's constraints, the learning algorithm against a random
+  angler and a selective one, and every spot and species entry for
+  consistency. `test/run.py` drives the whole UI in a simulated iPhone.
 
 ### The bite score
 
