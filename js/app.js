@@ -194,8 +194,8 @@
     var sea = sp && sp.sea ? sp.sea : null;
 
     var jobs = [
-      C.Api.weather(S.lat, S.lon, S.settings.model).then(function (r) { S.wx = r.data; S.stale = r.stale; S.fellBack = !!r.fellBack; })
-        .catch(function (e) { S.lastError = e; }),
+      C.Api.weather(S.lat, S.lon, S.settings.model).then(function (r) { S.wx = r.data; S.stale = r.stale; S.fellBack = !!r.fellBack; S.wxAt = r.cachedAt; })
+        .catch(function (e) { S.lastError = e; S.wx = S.wx || null; }),
       C.Api.local('bom.json').then(function (j) { S.bom = j; }).catch(function () {}),
       C.Api.local('tides.json').then(function (j) { S.bomTides = j; }).catch(function () {}),
       C.Api.live('obs.json').then(function (r) { S.live = r.data; }).catch(function () { S.live = null; }),
@@ -203,7 +203,7 @@
       C.Api.ensemble(S.lat, S.lon).then(function (r) { S.ens = r.data; }).catch(function () { S.ens = null; })
     ];
     if (sea) {
-      jobs.push(C.Api.marine(sea.lat, sea.lon).then(function (r) { S.marine = r.data; }).catch(function () { S.marine = null; }));
+      jobs.push(C.Api.marine(sea.lat, sea.lon).then(function (r) { S.marine = r.data; S.marineKm = r.offshoreKm; }).catch(function () { S.marine = null; }));
       jobs.push(C.Api.seaLevel(sea.lat, sea.lon).then(function (r) { S.seaLevel = r.data; }).catch(function () { S.seaLevel = null; }));
     } else { S.marine = null; S.seaLevel = null; }
 
@@ -275,7 +275,7 @@
   }
 
   function renderAll() {
-    renderNow(); renderForecast(); renderTides(); renderFish(); renderSettings(); renderBomLinks();
+    renderNow(); renderForecast(); renderTides(); renderFish(); renderSettings(); renderBomLinks(); renderStatus();
   }
 
   /* ================= NOW ============================================= */
@@ -357,6 +357,7 @@
     if (d.wave != null) cell('Swell', n1(d.wave) + ' <small>m</small>',
       (d.period ? n0(d.period) + ' s ' : '') + C.degToCompass(C.sampleSeries(S.marine.hourly.time, S.marine.hourly.swell_wave_direction, Date.now())));
     if (d.sst != null) cell('Water', n1(d.sst) + '°', seaTempNote(d.sst));
+    else if (S.spot && S.spot.sea) cell('Water', '<small>no reading</small>', 'sea temp not modelled here');
     cell('Cloud &amp; rain', n0(d.cloud) + '<small>%</small>',
       d.rain > 0 ? n1(d.rain) + ' mm falling' : (d.rain24 > 0.5 ? n1(d.rain24) + ' mm last 24 h' : 'Dry'));
     if (cells.length % 3 === 1) {
@@ -618,8 +619,8 @@
       out.push('<div class="hour' + (night ? ' night' : '') + '">' +
         '<div class="t">' + (Math.abs(ts - now) < 40 * 60000 ? 'Now' : t(ts)) + '</div>' +
         '<div class="ic">' + wx(code)[1] + '</div>' +
-        '<div class="tm">' + n0(H.temperature_2m[i]) + '°</div>' +
-        '<div class="wd">' + arrow(H.wind_direction_10m[i], 12) + ' ' + n0(H.wind_speed_10m[i]) + '</div>' +
+        '<div class="tm">' + (H.temperature_2m[i] != null ? n0(H.temperature_2m[i]) + '°' : '·') + '</div>' +
+        '<div class="wd">' + (H.wind_speed_10m[i] != null ? arrow(H.wind_direction_10m[i], 12) + ' ' + n0(H.wind_speed_10m[i]) : '·') + '</div>' +
         (sc != null ? '<div class="dot" style="background:' + scoreColor(sc) + '" title="' + sc + '"></div>' : '<div class="dot"></div>') +
         '</div>');
     }
@@ -665,12 +666,14 @@
     card.style.display = '';
     var Hh = S.marine.hourly, now = Date.now();
     function s(k) { return C.sampleSeries(Hh.time, Hh[k], now); }
-    var cells = [
-      ['Swell', n1(s('swell_wave_height')) + ' <small>m</small>', n0(s('swell_wave_period')) + ' s ' + C.degToCompass(s('swell_wave_direction'))],
-      ['Total sea', n1(s('wave_height')) + ' <small>m</small>', n0(s('wave_period')) + ' s ' + C.degToCompass(s('wave_direction'))],
-      ['Wind wave', n1(s('wind_wave_height')) + ' <small>m</small>', 'chop on top'],
-      ['Sea temp', n1(s('sea_surface_temperature')) + '°', seaTempNote(s('sea_surface_temperature'))]
-    ];
+    var cells = [];
+    if (s('swell_wave_height') != null) cells.push(['Swell', n1(s('swell_wave_height')) + ' <small>m</small>', n0(s('swell_wave_period')) + ' s ' + C.degToCompass(s('swell_wave_direction'))]);
+    if (s('wave_height') != null) cells.push(['Total sea', n1(s('wave_height')) + ' <small>m</small>', n0(s('wave_period')) + ' s ' + C.degToCompass(s('wave_direction'))]);
+    if (s('wind_wave_height') != null) cells.push(['Wind wave', n1(s('wind_wave_height')) + ' <small>m</small>', 'chop on top']);
+    if (s('sea_surface_temperature') != null) cells.push(['Sea temp', n1(s('sea_surface_temperature')) + '°', seaTempNote(s('sea_surface_temperature'))]);
+    else cells.push(['Sea temp', '<small>no reading</small>', 'not modelled at this point']);
+    if (!cells.length) { card.style.display = 'none'; return; }
+    el('marineNote').textContent = 'Open-water point about ' + (S.marineKm ? (22 + S.marineKm) : 22) + ' km off ' + (S.spot ? S.spot.name : 'the spot') + '. Inside a bay or estuary the swell will be smaller than this.';
     el('marineGrid').className = 'grid two';
     el('marineGrid').innerHTML = cells.map(function (c) {
       return '<div class="cell"><div class="k">' + c[0] + '</div><div class="v">' + c[1] + '</div><div class="x">' + c[2] + '</div></div>';
@@ -1300,6 +1303,47 @@
       closeSheet(); renderLog();
       alertBanner('Catch logged.', 'info');
     });
+  }
+
+  function dataStatus() {
+    var rows = [];
+    function row(name, ok, text) { rows.push({ name: name, ok: ok, text: text }); }
+    if (S.wx) {
+      var cov = Math.round(C.coverage(S.wx.hourly.time, S.wx.hourly.temperature_2m, 168) * 100);
+      row('Forecast', cov > 80 ? 'ok' : 'warn', (S.fellBack ? 'Multi-model blend — BOM ACCESS-G was not returning data' : (S.settings.model === 'bom_access_global' ? 'BOM ACCESS-G' : 'Multi-model blend')) +
+        ' · ' + cov + '% of the next 7 days filled' + (S.stale ? ' · showing an older download' : ''));
+    } else row('Forecast', 'bad', 'Nothing downloaded' + (S.lastError ? ' — ' + esc(String(S.lastError.message || S.lastError)) : ''));
+    if (S.spot && S.spot.sea) {
+      if (S.marine && S.marine.hourly && S.marine.hourly.wave_height) {
+        var mc = Math.round(C.coverage(S.marine.hourly.time, S.marine.hourly.wave_height, 168) * 100);
+        var sc = Math.round(C.coverage(S.marine.hourly.time, S.marine.hourly.sea_surface_temperature, 48) * 100);
+        row('Sea state', mc > 60 ? 'ok' : 'warn', 'Swell ' + mc + '% filled' + (S.marineKm ? ' · had to step ' + S.marineKm + ' km further offshore to find open water' : ''));
+        row('Water temp', sc > 60 ? 'ok' : 'warn', sc > 60 ? 'Sea surface temperature available' : 'Not modelled at this point — the cell shows no reading');
+      } else { row('Sea state', 'bad', 'No wave data came back for this coast'); }
+    } else row('Sea state', 'ok', 'Not applicable — inland or sheltered water');
+    if (S.tide) row('Tides', S.tide.source === 'bom' ? 'ok' : 'warn', S.tide.source === 'bom' ? 'Official BOM predictions for ' + S.tide.portName : 'Model estimate — the two-hourly BOM job has not written tides yet');
+    else if (S.spot && S.spot.port) row('Tides', 'bad', 'No tide data');
+    row('BOM text', S.bom && S.bom.coastal && Object.keys(S.bom.coastal).length ? 'ok' : 'warn',
+      S.bom && S.bom.coastal && Object.keys(S.bom.coastal).length ? 'Coastal waters forecast issued ' + esc(S.bom.updated || '') : 'Not fetched yet — run “Update BOM data” in GitHub Actions');
+    if (S.obs) row('Station', S.obs.ageMin != null && S.obs.ageMin < 90 ? 'ok' : 'warn', esc(S.obs.name) + ' · ' + S.obs.km + ' km · ' + (S.obs.ageMin != null ? S.obs.ageMin + ' min old' : 'age unknown'));
+    else row('Station', 'warn', S.live ? 'No BOM station within 45 km yet — the feed maps more stations every 10 min' : 'Live feed not reachable');
+    var nR = S.liveRadar && S.liveRadar.radars ? Object.keys(S.liveRadar.radars).length : 0;
+    row('BOM radar', nR ? 'ok' : 'warn', nR ? nR + ' radars · pulled ' + Math.round((Date.now() - S.liveRadar.fetched * 1000) / 60000) + ' min ago' : 'No frames yet — run “Live BOM feed” in GitHub Actions');
+    row('Confidence', S.spread ? 'ok' : 'warn', S.spread ? S.spread.members + '-member ensemble' : 'Ensemble not available — windows show no confidence tag');
+    return rows;
+  }
+
+  function renderStatus() {
+    var rows = dataStatus();
+    var dot = { ok: 'var(--great)', warn: 'var(--ok)', bad: 'var(--bad)' };
+    el('dataStatus').innerHTML = rows.map(function (r) {
+      return '<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line);align-items:flex-start">' +
+        '<div style="display:flex;gap:8px;align-items:flex-start"><span style="width:9px;height:9px;border-radius:50%;background:' + dot[r.ok] + ';margin-top:6px;flex:none"></span>' +
+        '<div><div style="font-weight:640;font-size:14px">' + r.name + '</div><div class="muted">' + r.text + '</div></div></div></div>';
+    }).join('') + '<div class="muted" style="margin-top:8px">Pulled ' + (S.wxAt ? t(S.wxAt) : '—') + '. Tap the refresh button up top to fetch again.</div>';
+    var bad = rows.filter(function (r) { return r.ok !== 'ok'; });
+    el('statusHint').style.display = bad.length ? '' : 'none';
+    el('statusHint').textContent = bad.length ? bad.length + ' data feed' + (bad.length > 1 ? 's' : '') + ' degraded — see Data status in settings' : '';
   }
 
   function renderAbout() {

@@ -98,6 +98,26 @@
 
   function round4(x) { return Math.round(x * 1e4) / 1e4; }
 
+  /* Fraction of non-null values in the next `hours` of an hourly series. */
+  function coverage(times, values, hours) {
+    if (!times || !values) return 0;
+    var now = Date.now() / 1000, n = 0, ok = 0;
+    for (var i = 0; i < times.length; i++) {
+      if (times[i] < now - 3600 || times[i] > now + hours * 3600) continue;
+      n++; if (values[i] != null) ok++;
+    }
+    return n ? ok / n : 0;
+  }
+  function usableWeather(j) {
+    if (!j || !j.hourly || !j.hourly.time) return false;
+    return coverage(j.hourly.time, j.hourly.temperature_2m, 48) > 0.8 &&
+           coverage(j.hourly.time, j.hourly.wind_speed_10m, 48) > 0.8;
+  }
+  function usableMarine(j) {
+    if (!j || !j.hourly || !j.hourly.time) return false;
+    return coverage(j.hourly.time, j.hourly.wave_height, 48) > 0.6;
+  }
+
   var Api = {
     weather: function (lat, lon, model) {
       var hourly = HOURLY_BASE.slice();
@@ -113,22 +133,40 @@
         '&wind_speed_unit=kn&forecast_days=7&past_days=1';
       var u = base + (model && model !== 'best_match' ? '&models=' + model : '');
       var key = 'wx.' + round4(lat) + ',' + round4(lon) + '.' + (model || 'bm');
-      return cachedJson(key, u, 30).catch(function (err) {
-        /* A model that does not carry one of these variables would otherwise
-           take the whole app down — fall back to the default blend. */
-        if (u === base) throw err;
+      function fallback() {
         return cachedJson(key + '.fallback', base, 30).then(function (r) { r.fellBack = true; return r; });
+      }
+      return cachedJson(key, u, 30).then(function (r) {
+        /* A single model can come back 200 with nulls when its feed is stale
+           (ACCESS-G has done this on Open-Meteo before). Treat that like an
+           error and use the multi-model blend instead. */
+        if (u !== base && !usableWeather(r.data)) return fallback();
+        return r;
+      }).catch(function (err) {
+        if (u === base) throw err;
+        return fallback();
       });
     },
 
-    marine: function (lat, lon) {
-      var u = OMM + '?latitude=' + round4(lat) + '&longitude=' + round4(lon) +
+    marine: function (lat, lon, step) {
+      /* The wave grid is coarse near the coast, so a point inside a bay can
+         come back as land (all nulls). Try the spot's sea point, then keep
+         stepping east until the model answers. */
+      step = step || 0;
+      var lon2 = lon + step * 0.2;
+      var u = OMM + '?latitude=' + round4(lat) + '&longitude=' + round4(lon2) +
         '&hourly=wave_height,wave_direction,wave_period,wind_wave_height,' +
         'swell_wave_height,swell_wave_direction,swell_wave_period,sea_surface_temperature' +
         '&daily=wave_height_max,wave_direction_dominant,wave_period_max' +
         '&timezone=' + encodeURIComponent(TZ) + '&timeformat=unixtime' +
         '&forecast_days=7&cell_selection=sea';
-      return cachedJson('mar.' + round4(lat) + ',' + round4(lon), u, 60);
+      return cachedJson('mar.' + round4(lat) + ',' + round4(lon2), u, 60).then(function (r) {
+        if (usableMarine(r.data) || step >= 3) { r.offshoreKm = Math.round(step * 0.2 * 111 * Math.cos(lat * Math.PI / 180)); return r; }
+        return Api.marine(lat, lon, step + 1);
+      }).catch(function (err) {
+        if (step >= 3) throw err;
+        return Api.marine(lat, lon, step + 1);
+      });
     },
 
     /* Model tide, used only when official BOM predictions are not in the repo. */
@@ -741,7 +779,7 @@
 
   global.Core = {
     TZ: TZ, Store: Store, Api: Api, Tides: Tides, Score: Score, Obs: Obs, Ensemble: Ensemble,
-    haversine: haversine,
+    haversine: haversine, coverage: coverage,
     sampleSeries: sampleSeries, sampleNearest: sampleNearest,
     degToCompass: degToCompass, clamp: clamp
   };
