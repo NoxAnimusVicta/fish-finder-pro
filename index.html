@@ -41,8 +41,10 @@
   </button>
 </header>
 
+<div class="ptr" id="ptr" aria-hidden="true">Pull to refresh</div>
 <main>
   <div id="alerts"></div>
+  <div class="banner info" id="installCard" style="display:none"><b>Put it on your home screen</b>In Safari tap Share (the square with the arrow), then <b style="display:inline">Add to Home Screen</b>. It opens full screen, keeps the last forecast when there is no signal, and asks for your location once. <button class="chip" id="installDone" style="margin-top:8px">Got it</button></div>
 
   <!-- ============ NOW ============ -->
   <section class="view on" id="v-now">
@@ -59,6 +61,10 @@
       <div class="factors" id="factors"></div>
       <div class="muted" id="scoreFoot" style="margin-top:10px"></div>
       <div class="muted" id="statusHint" style="margin-top:4px;color:var(--ok);display:none"></div>
+      <div class="row" style="margin-top:12px;gap:8px">
+        <button class="btn ghost small" id="shareBtn">Share conditions</button>
+        <button class="btn ghost small" id="noteBtn">My notes</button>
+      </div>
     </div>
 
     <div class="card">
@@ -84,6 +90,12 @@
     <div class="card">
       <h2>Best windows — next 7 days</h2>
       <div class="wlist" id="windows"><div class="skel" style="height:44px"></div><div class="skel" style="height:44px"></div></div>
+    </div>
+
+    <div class="card" id="noteCard" style="display:none">
+      <h2 id="noteTitle">My notes</h2>
+      <textarea id="spotNote" rows="4" placeholder="Gutters, marks, parking, what worked last time — stays on this phone."></textarea>
+      <div class="muted" id="noteMeta" style="margin-top:6px"></div>
     </div>
 
     <div class="card" id="bomCard" style="display:none">
@@ -147,6 +159,11 @@
     <div class="card">
       <h2>Moon feeding times</h2>
       <div id="solunarList"></div>
+    </div>
+    <div class="card">
+      <h2>Planner — next 4 weeks</h2>
+      <div class="muted" style="margin-bottom:8px">Moon and tide only — no weather this far out. Use it to pick the days, then check the forecast closer in.</div>
+      <div id="planner"></div>
     </div>
   </section>
 
@@ -284,8 +301,13 @@
 
     <div class="card">
       <h2>Catch log</h2>
-      <button class="btn ghost" id="addCatchBtn">Log a catch</button>
+      <div id="logToday"></div>
+      <div class="row" style="gap:8px">
+        <button class="btn ghost small" id="addCatchBtn">Log a catch</button>
+        <button class="btn ghost small" id="blankBtn">Fished, nothing</button>
+      </div>
       <div id="logList" style="margin-top:12px"></div>
+      <button class="btn ghost small" id="shareLogBtn" style="margin-top:10px;display:none">Share the log (CSV)</button>
       <div id="logInsight"></div>
     </div>
 
@@ -306,6 +328,13 @@
         </div>
       </div>
       <div class="field">
+        <label>Text size</label>
+        <div class="seg" id="textSeg">
+          <button data-x="normal">Normal</button>
+          <button data-x="large">Large</button>
+        </div>
+      </div>
+      <div class="field">
         <label>Theme</label>
         <div class="seg" id="themeSeg">
           <button data-t="auto">Auto</button>
@@ -323,6 +352,7 @@
     <div class="card">
       <h2>About</h2>
       <div class="footnote" id="about"></div>
+      <button class="btn ghost small" id="wipeBtn" style="margin-top:12px">Start fresh — wipe settings and log</button>
     </div>
   </section>
 </main>
