@@ -1,5 +1,5 @@
 /* Offline shell. Bump CACHE when you change any file below. */
-const CACHE = 'dffp-v5';
+const CACHE = 'dffp-v6';
 const SHELL = [
   './',
   './index.html',

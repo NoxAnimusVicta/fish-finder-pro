@@ -36,6 +36,9 @@
   <button class="iconbtn" id="refreshBtn" aria-label="Refresh">
     <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
   </button>
+  <button class="iconbtn" id="gearBtn" aria-label="Settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  </button>
 </header>
 
 <main>
@@ -60,7 +63,7 @@
 
     <div class="card">
       <h2>Right now</h2>
-      <div class="grid" id="nowGrid"></div>
+      <div class="grid" id="nowGrid"><div class="cell"><div class="skel" style="width:40%"></div><div class="skel" style="width:70%;margin-top:8px;height:20px"></div></div><div class="cell"><div class="skel" style="width:40%"></div><div class="skel" style="width:60%;margin-top:8px;height:20px"></div></div><div class="cell"><div class="skel" style="width:40%"></div><div class="skel" style="width:65%;margin-top:8px;height:20px"></div></div></div>
     </div>
 
     <div class="card" id="stationCard" style="display:none">
@@ -70,17 +73,17 @@
 
     <div class="card" id="tideNowCard">
       <h2>Tide</h2>
-      <div id="tideNow"></div>
+      <div id="tideNow"><div class="skel" style="width:55%;height:20px"></div><div class="skel" style="width:80%;margin-top:8px"></div></div>
     </div>
 
     <div class="card">
       <h2>Sun &amp; moon</h2>
-      <div id="sunMoon"></div>
+      <div id="sunMoon"><div class="skel" style="width:70%;height:18px"></div><div class="skel" style="width:50%;margin-top:8px"></div></div>
     </div>
 
     <div class="card">
       <h2>Best windows — next 7 days</h2>
-      <div class="wlist" id="windows"></div>
+      <div class="wlist" id="windows"><div class="skel" style="height:44px"></div><div class="skel" style="height:44px"></div></div>
     </div>
 
     <div class="card" id="bomCard" style="display:none">
@@ -103,7 +106,7 @@
       <div class="legend">
         <span><i style="background:var(--accent)"></i>Bite score</span>
         <span><i style="background:var(--ink3)"></i>Wind (kt)</span>
-        <span><i style="background:color-mix(in srgb,var(--ink) 12%,transparent)"></i>Night</span>
+        <span><i style="background:var(--t-ink-12)"></i>Night</span>
       </div>
     </div>
     <div class="card">
@@ -132,8 +135,8 @@
       <div id="tideChart"></div>
       <div class="legend">
         <span><i style="background:var(--accent)"></i>Tide height</span>
-        <span><i style="background:color-mix(in srgb,var(--accent2) 45%,transparent)"></i>Moon feeding period</span>
-        <span><i style="background:color-mix(in srgb,var(--ink) 12%,transparent)"></i>Night</span>
+        <span><i style="background:var(--t-accent2-45)"></i>Moon feeding period</span>
+        <span><i style="background:var(--t-ink-12)"></i>Night</span>
       </div>
     </div>
     <div class="card">
@@ -293,6 +296,13 @@
         <div class="seg" id="modelSeg">
           <button data-md="bom_access_global">BOM ACCESS-G</button>
           <button data-md="best_match">Best available</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Wind units</label>
+        <div class="seg" id="unitSeg">
+          <button data-u="kn">Knots</button>
+          <button data-u="kmh">km/h</button>
         </div>
       </div>
       <div class="field">
