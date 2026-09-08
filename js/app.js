@@ -1066,10 +1066,7 @@
     var sp = S.spot; if (!sp) return;
     var r = D.RADARS[sp.radar];
     var out = [];
-    if (r) {
-      out.push(['128 km radar loop — ' + r.name, 'https://www.bom.gov.au/products/' + r.base + '3.loop.shtml', 'BOM']);
-      out.push(['256 km radar loop — ' + r.name, 'https://www.bom.gov.au/products/' + r.base + '2.loop.shtml', 'BOM']);
-    }
+    out.push(['BOM rain radar & weather maps', 'https://www.bom.gov.au/weather-and-climate/rain-radar-and-weather-maps', 'BOM']);
     if (sp.district) out.push(['Coastal waters forecast — ' + D.DISTRICTS[sp.district], 'https://www.bom.gov.au/nsw/forecasts/coastalwaters.shtml', 'BOM']);
     out.push(['NSW marine wind warnings', 'https://www.bom.gov.au/nsw/warnings/', 'BOM']);
     out.push(['NSW tide tables', 'https://www.bom.gov.au/australia/tides/', 'BOM']);
