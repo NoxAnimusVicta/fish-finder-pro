@@ -57,10 +57,15 @@
 
   /* ==================== network ======================================== */
 
-  function withTimeout(url, ms) {
+  function withTimeout(url, ms, revalidate) {
     var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var t = setTimeout(function () { if (ctrl) ctrl.abort(); }, ms || 15000);
-    return fetch(url, ctrl ? { signal: ctrl.signal } : undefined)
+    var opts = {};
+    if (ctrl) opts.signal = ctrl.signal;
+    /* GitHub serves the data files with max-age=600; without this the browser
+       happily hands back a ten-minute-old copy without asking. */
+    if (revalidate) opts.cache = 'no-cache';
+    return fetch(url, opts)
       .then(function (r) {
         clearTimeout(t);
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -71,11 +76,11 @@
 
   /* Serve cache immediately when fresh; otherwise fetch, falling back to
      whatever stale copy we have so the app still shows something offline. */
-  function cachedJson(key, url, ttlMin) {
+  function cachedJson(key, url, ttlMin, revalidate) {
     var c = Store.cacheGet(key);
     var fresh = c && (Date.now() - c.t) < ttlMin * 60000;
     if (fresh) return Promise.resolve({ data: c.v, cachedAt: c.t, stale: false });
-    return withTimeout(url).then(function (j) {
+    return withTimeout(url, 15000, revalidate).then(function (j) {
       Store.cacheSet(key, j);
       return { data: j, cachedAt: Date.now(), stale: false };
     }).catch(function (err) {
@@ -191,7 +196,7 @@
 
     /* Written into the repo by the GitHub Action. Absent on a fresh install. */
     local: function (file) {
-      return withTimeout('./data/' + file + '?v=' + Math.floor(Date.now() / 3600000), 8000)
+      return withTimeout('./data/' + file + '?v=' + Math.floor(Date.now() / 600000), 8000, true)
         .then(function (j) { Store.cacheSet('local.' + file, j); return j; })
         .catch(function () {
           var c = Store.cacheGet('local.' + file);
@@ -217,7 +222,7 @@
     },
     live: function (name, ttlMin) {
       var url = Api.liveBase() + name + '?t=' + Math.floor(Date.now() / 300000);
-      return cachedJson('live.' + name, url, ttlMin || 4);
+      return cachedJson('live.' + name, url, ttlMin || 4, true);
     },
 
     /* BOM's own ensemble (ACCESS-GE) for spread, i.e. how sure the model is. */
