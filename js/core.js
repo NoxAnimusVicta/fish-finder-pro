@@ -29,6 +29,7 @@
         theme: s.theme || 'auto',
         unitsWind: s.unitsWind || 'kn',
         textSize: s.textSize || 'normal',
+        kind: s.kind || '',                        // '' = all of the spot's kinds, else e|b|r|o|f
         weights: s.weights || {},                  // expert multipliers per factor
         learn: s.learn !== false                   // let the catch log tune weights
       };
@@ -541,7 +542,7 @@
     else f = 0.3;
     if (p >= 1013 && p <= 1025) f = Math.min(1, f + 0.08);
     if (p < 1000) f *= 0.9;
-    if (d24 != null && d24 < -6) f = Math.min(f, 0.6);
+    if (d24 != null && d24 < -10) f = Math.min(f, 0.6);   // a real blow coming, not a normal front
     return clamp(f, 0, 1);
   }
 
@@ -550,10 +551,13 @@
     var mins = function (a) { return Math.abs(whenMs - a) / 60000; };
     var dr = mins(sunrise), ds = mins(sunset);
     var edge = Math.min(dr, ds);
-    if (edge <= 90) return clamp(1 - (edge / 90) * 0.35, 0.65, 1);
     var isNight = whenMs < sunrise - 30 * 60000 || whenMs > sunset + 30 * 60000;
-    if (isNight) return nightBiter ? 0.75 : 0.3;
-    return 0.42;
+    var floor = isNight ? (nightBiter ? 0.75 : 0.3) : 0.42;
+    if (edge <= 90) return clamp(1 - (edge / 90) * 0.35, 0.65, 1);
+    /* taper from the 0.65 at 90 min out to the day/night floor by 3 h, rather
+       than dropping off a cliff */
+    if (edge <= 180) return floor + (0.65 - floor) * (1 - (edge - 90) / 90);
+    return floor;
   }
 
   function tideFactor(tide, whenMs, maxRate, pref) {
@@ -694,7 +698,7 @@
       var T = wx.hourly.time;
       var start = now - 2 * HOUR;
       var end = T[T.length - 1] * 1000;
-      var sunCache = {}, solCache = {};
+      var sunCache = {}, solCache = {}, bSum = {}, bN = {};
       for (var t = Math.ceil(start / HOUR) * HOUR; t <= end; t += HOUR) {
         var d = new Date(t);
         var dayKey = global.Astro.parts(d, tz);
@@ -708,7 +712,12 @@
         var s = Score.at(t, wx, marine, tide, sunCache[k], solCache[k], c);
         out.push({ t: t, score: s.score, wind: s.wind, dir: s.dir, hazard: s.hazard,
                    sd: Ensemble.at(ctx.spread, t) });
+        for (var q = 0; q < s.parts.length; q++) { var pk = s.parts[q].key; bSum[pk] = (bSum[pk] || 0) + s.parts[q].f; bN[pk] = (bN[pk] || 0) + 1; }
       }
+      /* what each factor typically reads at this spot this week — the catch
+         log compares against this, not against a fixed number */
+      out.baseline = {};
+      for (var bk in bSum) out.baseline[bk] = bSum[bk] / bN[bk];
       return out;
     },
 
@@ -760,23 +769,37 @@
        a handful of catches before it says anything, and never moves a weight
        by more than about a third. */
     learn: function (log) {
-      var entries = (log || []).filter(function (e) { return e.parts && e.parts.length; });
-      if (entries.length < 6) return { ready: false, n: entries.length, mult: {} };
-      var sum = {}, n = {};
-      entries.forEach(function (e) {
-        e.parts.forEach(function (p) { sum[p.key] = (sum[p.key] || 0) + p.f; n[p.key] = (n[p.key] || 0) + 1; });
+      var all = (log || []).filter(function (e) { return e.parts && e.parts.length; });
+      var catches = all.filter(function (e) { return !e.blank; });
+      var blanks = all.filter(function (e) { return e.blank; });
+      if (catches.length < 6) return { ready: false, n: catches.length, blanks: blanks.length, mult: {} };
+      /* Mean factor value at the moment of each catch, against a reference:
+         the same factor on his blank sessions when there are enough of them,
+         otherwise the week-typical value recorded with the catch. Entries
+         from before baselines were recorded fall back to 0.6. */
+      var cs = {}, cn = {}, rs = {}, rn = {};
+      catches.forEach(function (e) {
+        e.parts.forEach(function (p) {
+          cs[p.key] = (cs[p.key] || 0) + p.f; cn[p.key] = (cn[p.key] || 0) + 1;
+          var b = p.b != null ? p.b : 0.6;
+          rs[p.key] = (rs[p.key] || 0) + b; rn[p.key] = (rn[p.key] || 0) + 1;
+        });
       });
+      var bs = {}, bn = {};
+      blanks.forEach(function (e) { e.parts.forEach(function (p) { bs[p.key] = (bs[p.key] || 0) + p.f; bn[p.key] = (bn[p.key] || 0) + 1; }); });
       var mult = {}, notes = [];
-      for (var k in sum) {
-        if (n[k] < 4) continue;
-        var mean = sum[k] / n[k];             // 0..1 — how good this factor tended to be when he caught
-        var lift = mean - 0.6;                // 0.6 is a fair "typical" value for a factor
-        var m = clamp(1 + lift * 1.6, 0.7, 1.35);
+      for (var k in cs) {
+        if (cn[k] < 4) continue;
+        var mean = cs[k] / cn[k];
+        var ref = (bn[k] >= 4) ? bs[k] / bn[k] : rs[k] / rn[k];
+        var lift = mean - ref;                 // >0: he catches when this factor reads better than usual
+        var conf = Math.min(1, cn[k] / 15);    // ease in — six catches move a weight a little, fifteen fully
+        var m = clamp(1 + lift * 2.2 * conf, 0.7, 1.35);
         mult[k] = Math.round(m * 100) / 100;
         if (m > 1.12) notes.push(k + ' up');
         if (m < 0.9) notes.push(k + ' down');
       }
-      return { ready: true, n: entries.length, mult: mult, notes: notes };
+      return { ready: true, n: catches.length, blanks: blanks.length, mult: mult, notes: notes, usingBlanks: blanks.length >= 4 };
     },
 
     verdict: function (n) {

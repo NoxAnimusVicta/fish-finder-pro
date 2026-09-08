@@ -119,6 +119,9 @@
     el('blankBtn').addEventListener('click', function () { openCatchForm(null, true); });
     el('shareLogBtn').addEventListener('click', shareLog);
     el('wipeBtn').addEventListener('click', wipeApp);
+    el('backupBtn').addEventListener('click', backup);
+    el('restoreBtn').addEventListener('click', restore);
+    window.DFFP = { S: S, planDay: planDay, bestBets: function () { return S.bets; }, recompute: function () { computeScores(); renderAll(); } };
     bindPullToRefresh();
     document.addEventListener('visibilitychange', function () {
       if (document.hidden || !S.wx) return;
@@ -349,13 +352,13 @@
     var picks = S.settings.species.map(function (n) {
       return D.SPECIES.filter(function (s) { return s.n === n; })[0];
     }).filter(Boolean);
-    S.learned = S.settings.learn ? C.Score.learn(C.Store.log().filter(function (e) { return !e.blank; })) : { ready: false, mult: {} };
+    S.learned = S.settings.learn ? C.Score.learn(C.Store.log()) : { ready: false, mult: {} };
     var weights = {}, expert = S.settings.weights || {};
     ['wind', 'pressure', 'light', 'solunar', 'tide', 'swell', 'cloud', 'sst'].forEach(function (k) {
       weights[k] = (expert[k] != null ? expert[k] : 1) * (S.learned.mult[k] != null ? S.learned.mult[k] : 1);
     });
     return {
-      kinds: S.spot ? S.spot.kinds : ['e'],
+      kinds: effectiveKinds(),
       faces: S.spot && !S.gpsFix ? S.spot.faces : (S.spot && S.gpsFix && S.gpsFix.km < 4 ? S.spot.faces : null),
       access: S.settings.access,
       windLimit: S.settings.windLimit,
@@ -364,6 +367,28 @@
       weights: weights,
       spread: S.spread,
       lat: S.lat, lon: S.lon
+    };
+  }
+
+  /* the spot's kinds, narrowed to the one he says he is fishing today */
+  function effectiveKinds() {
+    var sk = S.spot ? S.spot.kinds : ['e'], k = S.settings.kind;
+    return k && sk.indexOf(k) >= 0 ? [k] : sk;
+  }
+
+  function renderKindSeg() {
+    var seg = el('kindSeg'), sp = S.spot;
+    if (!sp || sp.kinds.length < 2) { seg.style.display = 'none'; return; }
+    var cur = sp.kinds.indexOf(S.settings.kind) >= 0 ? S.settings.kind : '';
+    seg.style.display = '';
+    seg.innerHTML = '<button data-k=""' + (cur === '' ? ' class="on"' : '') + '>Anywhere</button>' + sp.kinds.map(function (k) {
+      return '<button data-k="' + k + '"' + (cur === k ? ' class="on"' : '') + '>' + D.KIND_NAME[k] + '</button>';
+    }).join('');
+    seg.onclick = function (e) {
+      var b = e.target.closest('button[data-k]'); if (!b) return;
+      S.settings = C.Store.saveSettings({ kind: b.dataset.k });
+      renderKindSeg();
+      if (S.wx) { computeScores(); renderAll(); }
     };
   }
 
@@ -377,12 +402,62 @@
     S.detail = C.Score.at(Date.now(), S.wx, S.marine, S.tide, sun, sol.periods, cc);
     S.sun = sun; S.sol = sol;
     S.series = C.Score.series(S.wx, S.marine, S.tide, c, TZ);
+    S.factorBase = S.series.baseline || {};
     var top = S.series.reduce(function (m, p) { return Math.max(m, p.score); }, 0);
     S.windows = C.Score.windows(S.series, Math.max(48, top - 18), TZ);
+    S.bets = bestBets(c, cc);
+  }
+
+  /* Score every species that suits this water, now and at its best over the
+     next 24 h. The first pick drives the headline score; this is the answer
+     to "what should I actually chase". */
+  function bestBets(c, cc) {
+    var kinds = c.kinds, out = [];
+    var m = A.parts(new Date(), TZ).month - 1;
+    D.SPECIES.forEach(function (sp) {
+      if (sp.protected || sp.closed) return;
+      if (kinds.indexOf(sp.cat) < 0 && S.settings.species.indexOf(sp.n) < 0) return;
+      if (sp.season[m] === 0) return;
+      var one = { kinds: cc.kinds, faces: cc.faces, weights: cc.weights, access: cc.access, windLimit: cc.windLimit,
+                  swellLimit: cc.swellLimit, species: [sp], month: cc.month };
+      var now = C.Score.at(Date.now(), S.wx, S.marine, S.tide, S.sun, S.sol.periods, one).score;
+      var peak = now, peakAt = Date.now(), sunC = {}, solC = {}, h0 = Math.ceil(Date.now() / HOUR) * HOUR;
+      for (var h = 1; h <= 24; h += 2) {
+        var t = h0 + h * HOUR, dk = A.parts(new Date(t), TZ), key = dk.year + '-' + dk.month + '-' + dk.day;
+        if (!sunC[key]) { sunC[key] = A.sunTimes(new Date(t), S.lat, S.lon, TZ); solC[key] = A.solunar(new Date(t), S.lat, S.lon, TZ).periods; }
+        var sc = C.Score.at(t, S.wx, S.marine, S.tide, sunC[key], solC[key], { kinds: cc.kinds, faces: cc.faces, weights: cc.weights, access: cc.access,
+          windLimit: cc.windLimit, swellLimit: cc.swellLimit, species: [sp], month: dk.month - 1 }).score;
+        if (sc > peak) { peak = sc; peakAt = t; }
+      }
+      out.push({ n: sp.n, now: now, peak: peak, peakAt: peakAt, pick: S.settings.species.indexOf(sp.n) >= 0 });
+    });
+    out.sort(function (a, b) { return b.now - a.now || b.peak - a.peak; });
+    return out;
+  }
+
+  function renderBestBets() {
+    var card = el('bestCard'), bets = S.bets || [];
+    if (!bets.length) { card.style.display = 'none'; el('bestBet').style.display = 'none'; return; }
+    card.style.display = '';
+    el('bestTitle').textContent = 'Best bets at ' + (S.spot ? S.spot.name : 'this spot') + ' right now';
+    el('bestList').innerHTML = bets.slice(0, 6).map(function (b) {
+      return '<button class="best" data-s="' + esc(b.n) + '"><div style="width:44%"><div class="bn">' + esc(b.n) + (b.pick ? ' <span class="muted">· your pick</span>' : '') + '</div>' +
+        '<div class="bm">' + (b.peak > b.now + 4 ? 'better at ' + t(b.peakAt) + ' (' + b.peak + ')' : 'as good as it gets today') + '</div></div>' +
+        '<div class="bar"><i style="width:' + b.now + '%;background:' + scoreColor(b.now) + '"></i></div>' +
+        '<div class="pill" style="background:' + scoreColor(b.now) + '">' + b.now + '</div></button>';
+    }).join('');
+    el('bestList').onclick = function (e) { var b = e.target.closest('button[data-s]'); if (b) openSpecies(b.dataset.s); };
+    /* headline hint when something clearly beats the first pick */
+    var first = S.settings.species[0], top = bets[0], mine = bets.filter(function (b) { return b.n === first; })[0];
+    var hint = el('bestBet');
+    if (top && (!mine || (top.n !== first && top.now >= mine.now + 8))) {
+      hint.style.display = '';
+      hint.innerHTML = 'Better bet right now: <b style="display:inline;color:var(--ink)">' + esc(top.n) + '</b> (' + top.now + ')' + (mine ? ' vs ' + esc(first) + ' (' + mine.now + ')' : '') + ' — tap Fish for the list.';
+    } else hint.style.display = 'none';
   }
 
   function renderAll() {
-    renderNow(); renderForecast(); renderTides(); renderFish(); renderSettings(); renderBomLinks(); renderStatus();
+    renderNow(); renderForecast(); renderTides(); renderFish(); renderBestBets(); renderSettings(); renderBomLinks(); renderStatus();
   }
 
   /* ================= NOW ============================================= */
@@ -486,7 +561,44 @@
     }
     el('nowGrid').innerHTML = cells.join('');
 
-    renderStation(); renderTideNow(); renderSunMoon(); renderWindows(); renderBomText();
+    renderKindSeg(); renderBaro(); renderStation(); renderTideNow(); renderSunMoon(); renderWindows(); renderBomText();
+  }
+
+  function renderBaro() {
+    var card = el('baroCard'), H = S.wx && S.wx.hourly;
+    if (!H || !H.pressure_msl) { card.style.display = 'none'; return; }
+    var now = Date.now(), t0 = now - 24 * HOUR, t1 = now + 24 * HOUR, pts = [], min = 1e9, max = -1e9;
+    for (var i = 0; i < H.time.length; i++) {
+      var ts = H.time[i] * 1000, v = H.pressure_msl[i];
+      if (ts < t0 || ts > t1 || v == null) continue;
+      pts.push([ts, v]); if (v < min) min = v; if (v > max) max = v;
+    }
+    if (pts.length < 6) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    var lo = Math.floor(min - 1), hi = Math.ceil(max + 1); if (hi - lo < 6) { var mid = (hi + lo) / 2; lo = mid - 3; hi = mid + 3; }
+    var w = 340, h = 96, padL = 30, padB = 16;
+    var X = function (t) { return padL + (t - t0) / (t1 - t0) * (w - padL - 4); };
+    var Y = function (v) { return 8 + (hi - v) / (hi - lo) * (h - padB - 8); };
+    var path = pts.map(function (p, k) { return (k ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1); }).join(' ');
+    var nx = X(now), grid = '';
+    [lo, (lo + hi) / 2, hi].forEach(function (v) {
+      grid += '<line x1="' + padL + '" y1="' + Y(v).toFixed(1) + '" x2="' + (w - 4) + '" y2="' + Y(v).toFixed(1) + '" stroke="var(--line)" stroke-dasharray="3 3"/>' +
+        '<text x="2" y="' + (Y(v) + 3.5).toFixed(1) + '" font-size="9.5" fill="var(--ink3)">' + Math.round(v) + '</text>';
+    });
+    var obsDot = S.obs && S.obs.pressure != null ? '<circle cx="' + nx.toFixed(1) + '" cy="' + Y(S.obs.pressure).toFixed(1) + '" r="3.5" fill="var(--accent2)"/>' : '';
+    el('baroChart').innerHTML = '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:96px">' + grid +
+      '<line x1="' + nx.toFixed(1) + '" y1="4" x2="' + nx.toFixed(1) + '" y2="' + (h - padB) + '" stroke="var(--accent2)" stroke-width="1.5" stroke-dasharray="4 3"/>' +
+      '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round"/>' + obsDot +
+      '<text x="' + (padL + 2) + '" y="' + (h - 3) + '" font-size="9.5" fill="var(--ink3)">yesterday</text>' +
+      '<text x="' + (nx + 3).toFixed(1) + '" y="' + (h - 3) + '" font-size="9.5" fill="var(--accent2)">now</text>' +
+      '<text x="' + (w - 4) + '" y="' + (h - 3) + '" font-size="9.5" fill="var(--ink3)" text-anchor="end">tomorrow</text></svg>';
+    var d = S.detail, p24 = C.sampleSeries(H.time, H.pressure_msl, now - 24 * HOUR), n24 = C.sampleSeries(H.time, H.pressure_msl, now + 24 * HOUR);
+    var bits = [];
+    if (d && d.pressureTrend != null) bits.push(d.pressureTrend <= -0.6 ? 'Falling ' + n1(Math.abs(d.pressureTrend)) + ' hPa over 3 h — the classic pre-front feed'
+      : d.pressureTrend >= 0.5 ? 'Rising ' + n1(d.pressureTrend) + ' hPa over 3 h — fish often go quiet behind a change' : 'Steady over the last 3 h');
+    if (p24 != null && d && d.pressure != null) bits.push(n0(p24) + ' → ' + n0(d.pressure) + ' hPa since yesterday');
+    if (n24 != null && d && d.pressure != null && Math.abs(n24 - d.pressure) >= 2) bits.push('heading to ' + n0(n24) + ' by tomorrow');
+    el('baroNote').innerHTML = bits.join(' · ') + (S.obs && S.obs.pressure != null ? ' · <span style="color:var(--accent2)">●</span> station reading' : '');
   }
 
   function renderStation() {
@@ -1494,8 +1606,8 @@
     };
     el('weightList').onchange = function () { computeScores(); renderAll(); };
     el('learnNote').innerHTML = L.ready
-      ? 'Learned from ' + L.n + ' logged catches' + (L.notes.length ? ': ' + esc(L.notes.join(', ')) + '.' : '. Nothing stands out yet.')
-      : 'Log ' + Math.max(0, 6 - (L.n || 0)) + ' more catches and the app starts weighting what actually produces for you.';
+      ? 'Learned from ' + L.n + ' catches' + (L.usingBlanks ? ' against ' + L.blanks + ' blank sessions' : '') + (L.notes.length ? ': ' + esc(L.notes.join(', ')) + '.' : '. Nothing stands out yet.') + (L.n < 15 ? ' Still easing in — full strength at 15 catches.' : '')
+      : 'Log ' + Math.max(0, 6 - (L.n || 0)) + ' more catches and the app starts weighting what actually produces for you.' + (L.blanks ? ' Blank sessions sharpen it once you have a few of each.' : '');
     setSeg('learnSeg', 'l', S.settings.learn ? '1' : '0');
   }
 
@@ -1595,7 +1707,7 @@
         moon: S.sol ? Math.round(S.sol.illumination.fraction * 100) : null,
         moonPeriod: moonNow, lowLight: lowLight,
         score: S.detail ? S.detail.score : null,
-        parts: S.detail ? S.detail.parts.map(function (p) { return { key: p.key, f: Math.round(p.f * 100) / 100 }; }) : null
+        parts: S.detail ? S.detail.parts.map(function (p) { return { key: p.key, f: Math.round(p.f * 100) / 100, b: S.factorBase && S.factorBase[p.key] != null ? Math.round(S.factorBase[p.key] * 100) / 100 : null }; }) : null
       });
       closeSheet(); renderLog();
       if (S.settings.learn) { computeScores(); renderNow(); }
@@ -1651,6 +1763,30 @@
       if (navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: 'Catch log' }).catch(function () {}); return; }
     } catch (e) {}
     shareText(csv, 'Catch log');
+  }
+
+  function backup() {
+    var keys = {}, i;
+    try { for (i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('nf.') === 0 && k.indexOf('nf.cache.') < 0) keys[k] = localStorage.getItem(k); } } catch (e) {}
+    var json = JSON.stringify({ app: 'dffp', v: 1, at: new Date().toISOString(), data: keys });
+    try {
+      var file = new File([json], 'fish-finder-backup.json', { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: 'Fish Finder backup' }).catch(function () {}); return; }
+    } catch (e) {}
+    shareText(json, 'Fish Finder backup');
+  }
+
+  function restore() {
+    openSheet('<h3>Restore a backup</h3><div class="sub">Paste the contents of a fish-finder-backup.json file. It replaces the settings, favourites, notes and catch log on this phone.</div>' +
+      '<div class="field"><textarea id="rsText" rows="6" style="width:100%;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:var(--ink);font:inherit" placeholder="{&quot;app&quot;:&quot;dffp&quot;, …}"></textarea></div>' +
+      '<button class="btn" id="rsGo">Restore</button><div class="muted" id="rsMsg" style="margin-top:8px"></div>');
+    el('rsGo').addEventListener('click', function () {
+      var j; try { j = JSON.parse(el('rsText').value); } catch (e) { el('rsMsg').textContent = 'That is not a backup file.'; return; }
+      if (!j || j.app !== 'dffp' || !j.data) { el('rsMsg').textContent = 'That is not a Fish Finder backup.'; return; }
+      var n = 0; for (var k in j.data) if (k.indexOf('nf.') === 0) { try { localStorage.setItem(k, j.data[k]); n++; } catch (e) {} }
+      el('rsMsg').textContent = 'Restored ' + n + ' items — reloading.';
+      setTimeout(function () { location.reload(); }, 700);
+    });
   }
 
   function wipeApp() {

@@ -309,19 +309,25 @@
     /* Upper transit = altitude maximum; lower transit ("underfoot") = minimum.
        Both are real solunar triggers whether or not the moon is above the
        horizon at the time. */
-    var transit = c.maxTime ? refineExtreme(c.maxTime, f, true) : null;
-    var under = c.minTime ? refineExtreme(c.minTime, f, false) : null;
-    /* The minimum inside a 24h window can land on the window edge; in that
-       case the true lower transit is ~12h25m from the upper one. */
-    if (transit) {
-      var edge = 20 * 60000;
-      if (!under || Math.abs(under - start) < edge ||
-          Math.abs(under - (start.valueOf() + DAY_MS)) < edge) {
-        var guess = new Date(transit.valueOf() + 12.42 * 3600000);
-        if (guess.valueOf() > start.valueOf() + DAY_MS) guess = new Date(transit.valueOf() - 12.42 * 3600000);
-        under = refineExtreme(guess, f, false, 60);
-      }
+    /* A maximum or minimum that sits on the edge of the 24 h window is not a
+       transit at all — it is yesterday's or tomorrow's still tailing off. The
+       moon transits every ~24 h 50 min, so roughly one day a month has no
+       upper transit and one has no lower. Take the interior one as real and
+       place the other 12 h 25 min away, where it may fall just outside the day
+       (solunar() keeps whatever overlaps the day). */
+    var edge = 20 * 60000, s0 = start.valueOf(), s1 = s0 + DAY_MS;
+    function interior(t) { return t && t.valueOf() - s0 > edge && s1 - t.valueOf() > edge; }
+    var transit = interior(c.maxTime) ? refineExtreme(c.maxTime, f, true) : null;
+    var under = interior(c.minTime) ? refineExtreme(c.minTime, f, false) : null;
+    var HALF = 12.42 * 3600000;
+    function pair(from, maximise) {
+      /* the partner transit nearest to this day */
+      var g1 = from.valueOf() + HALF, g2 = from.valueOf() - HALF;
+      var g = Math.abs(g1 - (s0 + DAY_MS / 2)) < Math.abs(g2 - (s0 + DAY_MS / 2)) ? g1 : g2;
+      return refineExtreme(new Date(g), f, maximise, 60);
     }
+    if (transit && !under) under = pair(transit, false);
+    else if (under && !transit) transit = pair(under, true);
     return {
       dayStart: start,
       rise: c.rise, set: c.set,

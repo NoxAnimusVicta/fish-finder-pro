@@ -120,7 +120,7 @@
     ['Vincentia / Plantation Point', 'South Coast', -35.077, 150.677, -35.10, 151.14, 'portkembla', 8, 8, 'IDR033', 'batemans', 'ebro', 'Jervis Bay Marine Park — check the zoning before you fish.', 40],
     ['Sussex Inlet', 'South Coast', -35.157, 150.586, -35.17, 151.02, 'portkembla', 45, 75, 'IDR033', 'batemans', 'eb', '!St Georges Basin behind the inlet is heavily damped.', 110],
     ['Ulladulla / Mollymook', 'South Coast', -35.355, 150.474, -35.36, 150.88, 'portkembla', 0, 0, 'IDR033', 'batemans', 'ebro', '', 100],
-    ['Burrill Lake', 'South Coast', -35.390, 150.450, null, null, 'portkembla', 55, 80, 'IDR033', 'batemans', 'eb', '!Damped lake.', null],
+    ['Burrill Lake', 'South Coast', -35.390, 150.450, -35.40, 150.88, 'portkembla', 55, 80, 'IDR033', 'batemans', 'eb', '!Damped lake — the beach side at Dolphin Point is open surf.', 100],
     ['Batemans Bay / Clyde River', 'South Coast', -35.708, 150.180, -35.72, 150.60, 'eden', 15, 15, 'IDR403', 'batemans', 'ebro', '', 80],
     ['Moruya River', 'South Coast', -35.910, 150.150, -35.92, 150.56, 'eden', 20, 25, 'IDR403', 'batemans', 'ebro', '', 100],
     ['Narooma / Wagonga Inlet', 'Far South Coast', -36.213, 150.135, -36.22, 150.56, 'eden', 45, 30, 'IDR403', 'batemans', 'ebro', '', 100],
