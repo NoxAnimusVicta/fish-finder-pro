@@ -107,14 +107,14 @@ def fetch_coastal():
     if amoc:
         issued = amoc.get_text(strip=True)
 
-    by_name = {}
-    for area in soup.find_all("area"):
-        desc = (area.get("description") or "").strip()
-        by_name[desc.lower()] = area
+    areas = [(a, (a.get("description") or "").strip().lower()) for a in soup.find_all("area")]
 
     out = {}
     for key, name in DISTRICTS.items():
-        area = by_name.get(name.lower())
+        # descriptions vary ("Byron Coast", "Byron Coast: Point Danger to ...")
+        area = next((a for a, d in areas if d == name.lower()), None) or \
+               next((a for a, d in areas if d.startswith(name.lower())), None) or \
+               next((a for a, d in areas if name.lower().split()[0] in d and "coast" in d), None)
         if area is None:
             continue
         periods = []
