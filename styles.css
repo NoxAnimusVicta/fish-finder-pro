@@ -175,7 +175,7 @@ main { padding: 12px 14px calc(96px + var(--safe-b)); max-width: 720px; margin: 
 
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   padding: 6px 6px calc(6px + var(--safe-b));
   background: var(--t-bg-92);
   backdrop-filter: saturate(1.6) blur(16px);
@@ -418,3 +418,20 @@ html.big body { zoom: 1.14; }
 .best .bar i { display: block; height: 100%; border-radius: 3px; }
 .best .pill { min-width: 38px; }
 #kindSeg button { font-size: 12.5px; padding: 8px 4px; }
+
+/* ============ world leaderboard ==================================== */
+.lbhero { text-align: center; padding: 10px 0 6px; }
+.lbhero .cup { font-size: 44px; line-height: 1; }
+.lbhero h1 { margin: 8px 0 2px; font-size: 22px; letter-spacing: -.02em; }
+.lbhero .sub { color: var(--ink3); font-size: 13px; }
+.lb { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.lb:last-child { border-bottom: 0; }
+.lb .rk { width: 40px; flex: none; text-align: center; font-weight: 800; font-size: 17px; color: var(--ink3); }
+.lb .nm { flex: 1; font-weight: 640; font-size: 16px; }
+.lb .nm small { display: block; font-weight: 500; font-size: 12px; color: var(--ink3); margin-top: 2px; }
+.lb .pts { color: var(--ink3); font-size: 12.5px; white-space: nowrap; }
+.lb.gold { background: linear-gradient(90deg, var(--t-accent2-22), transparent); margin: 0 -8px; padding: 14px 8px; border-radius: 14px; border-bottom: 0; }
+.lb.gold .rk, .lb.silver .rk { font-size: 24px; color: var(--ink); }
+.lb.gold .nm { font-size: 19px; }
+.lb.silver { background: linear-gradient(90deg, var(--t-ink-12), transparent); margin: 0 -8px; padding: 12px 8px; border-radius: 14px; }
+.lb.meh .nm, .lb.meh .rk { color: var(--ink3); font-weight: 500; }
