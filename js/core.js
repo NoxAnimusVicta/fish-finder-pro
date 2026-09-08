@@ -28,6 +28,7 @@
         model: s.model || 'bom_access_global',
         theme: s.theme || 'auto',
         unitsWind: s.unitsWind || 'kn',
+        textSize: s.textSize || 'normal',
         weights: s.weights || {},                  // expert multipliers per factor
         learn: s.learn !== false                   // let the catch log tune weights
       };
@@ -52,7 +53,32 @@
       var c = Store._get('nf.cache.' + key, null);
       return c && c.t && c.v ? c : null;
     },
-    cacheSet: function (key, value) { Store._set('nf.cache.' + key, { t: Date.now(), v: value }); }
+    cacheSet: function (key, value) { Store._set('nf.cache.' + key, { t: Date.now(), v: value }); },
+    /* favourites, recents and per-spot notes */
+    favs: function () { return Store._get('nf.favs', []); },
+    toggleFav: function (id) {
+      var f = Store.favs(), i = f.indexOf(id);
+      if (i >= 0) f.splice(i, 1); else f.push(id);
+      Store._set('nf.favs', f); return f;
+    },
+    recent: function () { return Store._get('nf.recent', []); },
+    pushRecent: function (id) {
+      var r = Store.recent().filter(function (x) { return x !== id; });
+      r.unshift(id); r = r.slice(0, 5);
+      Store._set('nf.recent', r); return r;
+    },
+    note: function (id) { return Store._get('nf.note.' + id, ''); },
+    setNote: function (id, text) {
+      if (text) Store._set('nf.note.' + id, text);
+      else { try { localStorage.removeItem('nf.note.' + id); } catch (e) {} }
+    },
+    wipe: function () {
+      try {
+        var keys = [];
+        for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('nf.') === 0) keys.push(k); }
+        keys.forEach(function (k) { localStorage.removeItem(k); });
+      } catch (e) {}
+    }
   };
 
   /* ==================== network ======================================== */
@@ -787,7 +813,7 @@
     TZ: TZ, Store: Store, Api: Api, Tides: Tides, Score: Score, Obs: Obs, Ensemble: Ensemble,
     haversine: haversine, coverage: coverage,
     sampleSeries: sampleSeries, sampleNearest: sampleNearest,
-    degToCompass: degToCompass, clamp: clamp
+    degToCompass: degToCompass, clamp: clamp, exposure: exposure
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 

@@ -85,6 +85,7 @@
     var th = S.settings.theme;
     if (th === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', th);
+    document.documentElement.classList.toggle('big', S.settings.textSize === 'large');
   }
 
   function init() {
@@ -102,8 +103,32 @@
     el('sheetBg').addEventListener('click', closeSheet);
     el('sheetClose').addEventListener('click', closeSheet);
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheet(); });
-    renderRuleLinks(); renderAbout();
+    el('shareBtn').addEventListener('click', shareConditions);
+    el('noteBtn').addEventListener('click', function () {
+      var c = el('noteCard'); c.style.display = '';
+      c.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(function () { el('spotNote').focus(); }, 350);
+    });
+    el('spotNote').addEventListener('input', function () {
+      var id = S.spot ? S.spot.id : null; if (id == null) return;
+      clearTimeout(S.noteTimer);
+      var v = this.value;
+      S.noteTimer = setTimeout(function () { C.Store.setNote(id, v.trim()); el('noteMeta').textContent = v.trim() ? 'Saved on this phone.' : ''; }, 400);
+    });
+    el('installDone').addEventListener('click', function () { C.Store._set('nf.installHintDone', true); el('installCard').style.display = 'none'; });
+    el('blankBtn').addEventListener('click', function () { openCatchForm(null, true); });
+    el('shareLogBtn').addEventListener('click', shareLog);
+    el('wipeBtn').addEventListener('click', wipeApp);
+    bindPullToRefresh();
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden || !S.wx) return;
+      if (S.wxAt && Date.now() - S.wxAt > 20 * 60000) load(true);
+      else { computeScores(); renderNow(); }
+    });
+    renderRuleLinks(); renderAbout(); installHint();
     setSpot(S.settings.spot, true);
+    var lastTab = C.Store._get('nf.tab', 'now');
+    if (lastTab && lastTab !== 'now' && lastTab !== 'me') setTimeout(function () { showView(lastTab); }, 0);
     load(false);
     if (S.settings.useGps) locate(false);
     if ('serviceWorker' in navigator) {
@@ -121,6 +146,8 @@
     var tabs = el('tabs');
     tabs.addEventListener('click', function (e) {
       var b = e.target.closest('button[data-v]'); if (!b) return;
+      if (b.classList.contains('on') && el('v-' + b.dataset.v).classList.contains('on')) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+      C.Store._set('nf.tab', b.dataset.v);
       Array.prototype.forEach.call(tabs.children, function (x) { x.classList.toggle('on', x === b); });
       ['now', 'forecast', 'tides', 'maps', 'fish', 'me'].forEach(function (v) {
         var node = el('v-' + v); if (node) node.classList.toggle('on', v === b.dataset.v);
@@ -171,7 +198,49 @@
     S.spot = s; S.lat = s.lat; S.lon = s.lon; S.gpsFix = null;
     el('spotName').textContent = s.name;
     el('spotRegion').textContent = s.region;
-    if (!quiet) { C.Store.saveSettings({ spot: s.id }); S.settings = C.Store.settings(); load(true); }
+    renderNote();
+    if (!quiet) { C.Store.saveSettings({ spot: s.id }); S.settings = C.Store.settings(); C.Store.pushRecent(s.id); load(true); }
+  }
+
+  function renderNote() {
+    var sp = S.spot; if (!sp) return;
+    var n = C.Store.note(sp.id);
+    el('noteTitle').textContent = 'My notes — ' + sp.name;
+    el('spotNote').value = n;
+    el('noteMeta').textContent = n ? 'Saved on this phone.' : '';
+    el('noteCard').style.display = n ? '' : 'none';
+  }
+
+  /* Safari only installs from its share sheet — say so once, on an iPhone
+     that is still running the app inside the browser. */
+  function installHint() {
+    var ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var standalone = window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    if (ios && !standalone && !C.Store._get('nf.installHintDone', false)) el('installCard').style.display = '';
+  }
+
+  function bindPullToRefresh() {
+    var ptr = el('ptr'), y0 = null, dy = 0, armed = false;
+    document.addEventListener('touchstart', function (e) {
+      if (window.scrollY > 2 || el('sheet').classList.contains('on')) { y0 = null; return; }
+      y0 = e.touches[0].clientY; dy = 0; armed = false;
+    }, { passive: true });
+    document.addEventListener('touchmove', function (e) {
+      if (y0 == null) return;
+      dy = e.touches[0].clientY - y0;
+      if (dy > 24 && window.scrollY <= 2) {
+        ptr.classList.add('show');
+        armed = dy > 90;
+        ptr.classList.toggle('armed', armed);
+        ptr.textContent = armed ? 'Release to refresh' : 'Pull to refresh';
+      } else ptr.classList.remove('show');
+    }, { passive: true });
+    document.addEventListener('touchend', function () {
+      if (y0 == null) return;
+      ptr.classList.remove('show', 'armed');
+      if (armed) load(true);
+      y0 = null; armed = false;
+    });
   }
 
   function locate(explicit) {
@@ -196,11 +265,13 @@
                    kinds: ['f'], note: '', damped: false, faces: null };
         el('spotName').textContent = 'Your location';
         el('spotRegion').textContent = S.spot.region;
+        renderNote();
       } else {
         S.spot = near.spot;
         el('spotName').textContent = near.km < 3 ? near.spot.name : ('Near ' + near.spot.name);
         el('spotRegion').textContent = near.km < 3 ? near.spot.region
           : (near.km.toFixed(0) + ' km from ' + near.spot.name);
+        renderNote();
       }
       load(true);
     }, function () {
@@ -278,7 +349,7 @@
     var picks = S.settings.species.map(function (n) {
       return D.SPECIES.filter(function (s) { return s.n === n; })[0];
     }).filter(Boolean);
-    S.learned = S.settings.learn ? C.Score.learn(C.Store.log()) : { ready: false, mult: {} };
+    S.learned = S.settings.learn ? C.Score.learn(C.Store.log().filter(function (e) { return !e.blank; })) : { ready: false, mult: {} };
     var weights = {}, expert = S.settings.weights || {};
     ['wind', 'pressure', 'light', 'solunar', 'tide', 'swell', 'cloud', 'sst'].forEach(function (k) {
       weights[k] = (expert[k] != null ? expert[k] : 1) * (S.learned.mult[k] != null ? S.learned.mult[k] : 1);
@@ -385,8 +456,13 @@
     /* the grid */
     var cells = [];
     function cell(k, v, x) { cells.push('<div class="cell"><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="x">' + (x || '&nbsp;') + '</div></div>'); }
+    var exText = '';
+    if (S.spot && S.spot.faces != null && d.dir != null && d.wind != null && d.wind >= 4) {
+      var ex = C.exposure(d.dir, S.spot.faces);
+      exText = ex.on > 0.6 ? ' · onshore' : ex.off > 0.6 ? ' · offshore' : ' · cross-shore';
+    }
     cell('Wind', wv(d.wind) + ' <small>' + wu() + '</small> ' + arrow(d.dir, 17),
-      C.degToCompass(d.dir) + ' · gusts ' + wv(d.gust) + ' ' + wu());
+      C.degToCompass(d.dir) + ' · gusts ' + wv(d.gust) + ' ' + wu() + exText);
     var HN = S.wx.hourly, nowMs = Date.now();
     var code = C.sampleNearest(HN.time, HN.weather_code, nowMs);
     cell('Air', n0(C.sampleSeries(HN.time, HN.temperature_2m, nowMs)) + '°',
@@ -713,7 +789,8 @@
       var sdDay = null, sdN = 0, sdSum = 0;
       S.series.forEach(function (p) { if (p.t >= ts && p.t < ts + DAY && p.sd != null) { sdSum += p.sd; sdN++; } });
       if (sdN) sdDay = C.Ensemble.label(sdSum / sdN);
-      out.push('<div class="day"><div><div class="dn">' + relDay(ts) + '</div><div class="dd">' + fDate.format(new Date(ts)) +
+      var di = Math.round((A.startOfLocalDay(new Date(ts), TZ).valueOf() - A.startOfLocalDay(new Date(), TZ).valueOf()) / DAY);
+      out.push('<div class="day' + (di >= 0 && di < 7 ? ' tap" data-di="' + di : '') + '"><div><div class="dn">' + relDay(ts) + '</div><div class="dd">' + fDate.format(new Date(ts)) +
         (sdDay ? '<br><span style="color:' + toneColor(sdDay.tone) + '">' + sdDay.text.split(' ')[0] + ' conf.</span>' : '') + '</div></div>' +
         '<div class="di">' + wx(Dy.weather_code[i])[1] + '</div>' +
         '<div><div class="dt">' + n0(Dy.temperature_2m_min[i]) + '° – ' + n0(Dy.temperature_2m_max[i]) + '°' +
@@ -724,6 +801,10 @@
         '<div class="pill" style="background:' + scoreColor(best) + '">' + best + '</div></div>');
     }
     el('dayList').innerHTML = out.join('');
+    el('dayList').onclick = function (e) {
+      var r = e.target.closest('.day[data-di]'); if (!r) return;
+      S.tideDay = +r.dataset.di; showView('tides');
+    };
   }
 
   function renderMarine() {
@@ -825,6 +906,65 @@
         '<div class="muted">' + t(p.start) + ' – ' + t(p.end) + '</div></div>' +
         '<div style="color:var(--accent2);letter-spacing:2px">' + stars + '</div></div>';
     }).join('') + '<div class="muted" style="margin-top:10px">Majors run either side of the moon directly overhead or directly underfoot; minors either side of moonrise and moonset. They matter most when they land on a tide change or on first or last light.</div>';
+
+    renderPlanner();
+  }
+
+  /* Moon + tide planning score for a day, weather-free: how well the moon
+     periods and tide changes line up with first and last light, plus the
+     phase and the size of the tide. 0-100. */
+  function planDay(dayStart) {
+    var sun = A.sunTimes(dayStart, S.lat, S.lon, TZ), sol = A.solunar(dayStart, S.lat, S.lon, TZ);
+    var edges = [sun.sunrise, sun.sunset].filter(Boolean).map(function (x) { return x.valueOf(); });
+    function nearEdge(ms, tol) { return edges.some(function (e) { return Math.abs(e - ms) <= tol * 60000; }); }
+    var score = 20, why = [];
+    var majAtLight = sol.periods.some(function (p) { return p.kind === 'major' && (nearEdge(p.start.valueOf(), 75) || nearEdge(p.end.valueOf(), 75) || nearEdge((p.start.valueOf() + p.end.valueOf()) / 2, 75)); });
+    var minAtLight = sol.periods.some(function (p) { return p.kind === 'minor' && nearEdge((p.start.valueOf() + p.end.valueOf()) / 2, 60); });
+    if (majAtLight) { score += 30; why.push('major on the light change'); }
+    else if (minAtLight) { score += 12; why.push('minor on the light change'); }
+    var ex = S.tide ? C.Tides.extremesForDay(S.tide, dayStart.valueOf()) : [];
+    var changesAtLight = ex.filter(function (e) { return nearEdge(e.t, 90); }).length;
+    if (changesAtLight) { score += Math.min(35, 25 * changesAtLight); why.push('tide change at ' + (changesAtLight > 1 ? 'both' : 'dawn or dusk')); }
+    var il = sol.illumination.fraction;
+    if (il >= 0.9 || il <= 0.1) { score += 15; why.push(il >= 0.9 ? 'full moon' : 'new moon'); }
+    else if (il >= 0.4 && il <= 0.6) score -= 3;
+    if (ex.length >= 2) {
+      var hi = Math.max.apply(null, ex.map(function (e) { return e.h; })), lo = Math.min.apply(null, ex.map(function (e) { return e.h; }));
+      var rng = hi - lo, ref = S.tideRangeRef || 1.6;
+      score += Math.round(10 * Math.min(1.2, rng / ref));
+      if (rng / ref > 1.05) why.push('big tides');
+    }
+    return { score: Math.max(0, Math.min(100, Math.round(score))), why: why, sun: sun, sol: sol, ex: ex };
+  }
+
+  function renderPlanner() {
+    var box = el('planner'); if (!box) return;
+    if (S.tide && S.tide.extremes.length > 4) {
+      var rngs = [];
+      for (var k = 1; k < S.tide.extremes.length; k++) rngs.push(Math.abs(S.tide.extremes[k].h - S.tide.extremes[k - 1].h));
+      rngs.sort(function (a, b) { return a - b; });
+      S.tideRangeRef = rngs[Math.floor(rngs.length * 0.6)] || 1.6;
+    }
+    var glyphs = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'];
+    function short(ms) { return t(ms).replace(':00', '').replace('am', 'a').replace('pm', 'p'); }
+    var rows = [];
+    for (var i = 0; i < 28; i++) {
+      var ds = A.addDaysLocal(new Date(), i, TZ), pd = planDay(ds);
+      var majors = pd.sol.periods.filter(function (p) { return p.kind === 'major'; }).sort(function (x, y) { return x.start - y.start; }).map(function (p) { return short(p.start); });
+      var tides = pd.ex.map(function (e) { return (e.type === 'high' ? 'H' : 'L') + ' ' + short(e.t); });
+      rows.push('<div class="plan' + (i < 7 ? ' tap' : '') + (i === S.tideDay ? ' sel' : '') + '" data-pi="' + i + '">' +
+        '<div class="pd"><b>' + (i === 0 ? 'Today' : dayName(ds)) + '</b><span>' + fDate.format(ds) + '</span></div>' +
+        '<div class="pm"><span class="mt">' + glyphs[pd.sol.illumination.index] + ' ' + Math.round(pd.sol.illumination.fraction * 100) + '% · major' + (majors.length > 1 ? 's ' : ' ') + (majors.join(' & ') || '—') + '</span><br>' +
+        (tides.length ? tides.join(' · ') : (S.tide ? '<span class="muted">tides not published yet</span>' : '<span class="muted">no tide here</span>')) +
+        (pd.why.length ? '<br><span class="muted">' + esc(pd.why.join(' · ')) + '</span>' : '') + '</div>' +
+        '<div class="pill" style="background:' + scoreColor(pd.score) + '">' + pd.score + '</div></div>');
+    }
+    box.innerHTML = rows.join('');
+    box.onclick = function (e) {
+      var r = e.target.closest('.plan.tap'); if (!r) return;
+      S.tideDay = +r.dataset.pi; renderTides();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
   }
 
   function tideDayChart(dayStart, sun, sol) {
@@ -1278,6 +1418,7 @@
     seg('modelSeg', 'md', function (v) { S.settings = C.Store.saveSettings({ model: v }); load(true); });
     seg('themeSeg', 't', function (v) { S.settings = C.Store.saveSettings({ theme: v }); applyTheme(); });
     seg('unitSeg', 'u', function (v) { S.settings = C.Store.saveSettings({ unitsWind: v }); renderAll(); });
+    seg('textSeg', 'x', function (v) { S.settings = C.Store.saveSettings({ textSize: v }); applyTheme(); });
     seg('learnSeg', 'l', function (v) { S.settings = C.Store.saveSettings({ learn: v === '1' }); computeScores(); renderAll(); });
     el('resetWeights').addEventListener('click', function () {
       S.settings = C.Store.saveSettings({ weights: {} }); computeScores(); renderAll();
@@ -1313,6 +1454,7 @@
     setSeg('modelSeg', 'md', S.settings.model);
     setSeg('themeSeg', 't', S.settings.theme);
     setSeg('unitSeg', 'u', S.settings.unitsWind);
+    setSeg('textSeg', 'x', S.settings.textSize || 'normal');
     el('windLimVal').textContent = wv(S.settings.windLimit) + ' ' + wu();
     el('windLim').value = S.settings.windLimit;
     el('swellLim').value = S.settings.swellLimit; el('swellLimVal').textContent = (+S.settings.swellLimit).toFixed(1);
@@ -1357,14 +1499,36 @@
     setSeg('learnSeg', 'l', S.settings.learn ? '1' : '0');
   }
 
+  function bagLimit(name) {
+    var sp = D.SPECIES.filter(function (x) { return x.n === name; })[0];
+    if (!sp || !sp.bag) return null;
+    var m = String(sp.bag).match(/\d+/);
+    return m ? +m[0] : null;
+  }
+
+  function renderToday(l) {
+    var day0 = A.startOfLocalDay(new Date(), TZ).valueOf(), tally = {}, order = [];
+    l.forEach(function (e) {
+      if (e.blank || e.t < day0) return;
+      if (!tally[e.species]) { tally[e.species] = 0; order.push(e.species); }
+      tally[e.species]++;
+    });
+    el('logToday').innerHTML = order.length ? '<div class="today">' + order.map(function (n) {
+      var bag = bagLimit(n), full = bag != null && tally[n] >= bag;
+      return '<span class="chip' + (full ? ' full' : '') + '">' + esc(n) + ' ' + tally[n] + (bag != null ? ' / ' + bag : '') + (full ? ' — bag full' : '') + '</span>';
+    }).join('') + '</div>' : '';
+  }
+
   function renderLog() {
     var l = C.Store.log();
+    renderToday(l);
+    el('shareLogBtn').style.display = l.length ? '' : 'none';
     el('logList').innerHTML = l.length ? l.slice(0, 12).map(function (e) {
-      return '<div class="logitem"><div><div>' + esc(e.species) + (e.length ? ' · ' + e.length + ' cm' : '') + '</div>' +
+      return '<div class="logitem"><div><div>' + (e.blank ? '<span class="muted">Fished, nothing</span>' : esc(e.species) + (e.length ? ' · ' + e.length + ' cm' : '')) + '</div>' +
         '<div class="lm">' + esc(e.spot) + ' · ' + fDate.format(new Date(e.t)) + ' ' + t(e.t) +
         (e.tide ? ' · ' + esc(e.tide) : '') + (e.wind != null ? ' · ' + n0(e.wind) + ' kt' : '') + '</div></div>' +
         '<button class="chip" data-del="' + e.id + '">✕</button></div>';
-    }).join('') : '<div class="empty">No catches logged yet. Every one you log records the tide, wind, moon and barometer with it.</div>';
+    }).join('') + (l.length > 12 ? '<div class="muted" style="margin-top:6px">' + (l.length - 12) + ' more in the shared CSV.</div>' : '') : '<div class="empty">No catches logged yet. Every one you log records the tide, wind, moon and barometer with it.</div>';
     el('logList').onclick = function (e) {
       var b = e.target.closest('button[data-del]'); if (!b) return;
       C.Store.removeCatch(b.dataset.del); renderLog();
@@ -1372,7 +1536,8 @@
     el('logInsight').innerHTML = logInsight(l);
   }
 
-  function logInsight(l) {
+  function logInsight(all) {
+    var l = all.filter(function (e) { return !e.blank; }), blanks = all.length - l.length;
     if (l.length < 4) return '';
     var runIn = 0, runOut = 0, lowWind = 0, inMoon = 0, lowLight = 0;
     l.forEach(function (e) {
@@ -1387,23 +1552,26 @@
     if (lowWind) bits.push(lowWind + ' with wind under 12 kt');
     if (inMoon) bits.push(inMoon + ' inside a moon period');
     if (lowLight) bits.push(lowLight + ' at first or last light');
+    if (blanks) bits.push(blanks + ' blank session' + (blanks > 1 ? 's' : '') + ' logged');
     return '<div class="banner info" style="margin-top:12px"><b>Your ' + l.length + ' logged catches</b>' + bits.join(' · ') + '</div>';
   }
 
-  function openCatchForm(presetSpecies) {
+  function openCatchForm(presetSpecies, blank) {
     var opts = D.SPECIES.map(function (s) { return '<option>' + esc(s.n) + '</option>'; }).join('');
     var st = S.tide ? C.Tides.state(S.tide, Date.now()) : null;
-    openSheet('<h3>Log a catch</h3><div class="sub">Conditions are saved with it automatically.</div>' +
-      '<div class="field"><label>Species</label><select id="cSpecies">' + opts + '</select></div>' +
-      '<div class="field"><label>Length (cm) — optional</label><input type="number" id="cLen" inputmode="numeric" placeholder="e.g. 42"></div>' +
+    openSheet((blank ? '<h3>Fished, nothing</h3><div class="sub">A blank session is worth logging — it tells the pattern-finder what did not work. It is kept out of the learning until you have enough catches to compare it with.</div>'
+      : '<h3>Log a catch</h3><div class="sub">Conditions are saved with it automatically.</div>') +
+      (blank ? '<div class="field"><label>What you were after</label><select id="cSpecies"><option>Anything</option>' + opts + '</select></div>'
+        : '<div class="field"><label>Species</label><select id="cSpecies">' + opts + '</select></div>' +
+      '<div class="field"><label>Length (cm) — optional</label><input type="number" id="cLen" inputmode="numeric" placeholder="e.g. 42"></div>') +
       '<div class="field"><label>Notes — optional</label><input type="text" id="cNote" placeholder="Bait, spot, what it took"></div>' +
       '<div class="muted" style="margin-bottom:12px">Recording: ' + esc(S.spot ? S.spot.name : '') +
       (st ? ' · ' + (st.rising ? 'running in' : 'running out') : '') +
       (S.detail && S.detail.wind != null ? ' · ' + n0(S.detail.wind) + ' kt ' + C.degToCompass(S.detail.dir) : '') +
       (S.detail && S.detail.pressure != null ? ' · ' + n0(S.detail.pressure) + ' hPa' : '') + '</div>' +
-      '<button class="btn" id="cSave">Save catch</button>');
+      '<button class="btn" id="cSave">' + (blank ? 'Save blank session' : 'Save catch') + '</button>');
     if (typeof presetSpecies === 'string') el('cSpecies').value = presetSpecies;
-    else if (S.settings.species[0]) el('cSpecies').value = S.settings.species[0];
+    else if (!blank && S.settings.species[0]) el('cSpecies').value = S.settings.species[0];
     el('cSave').addEventListener('click', function () {
       var moonNow = S.sol ? A.solunarStrength(new Date(), S.sol.periods) > 0.2 : false;
       var lowLight = false;
@@ -1413,8 +1581,9 @@
       }
       C.Store.addCatch({
         id: String(Date.now()), t: Date.now(),
+        blank: !!blank,
         species: el('cSpecies').value,
-        length: el('cLen').value ? +el('cLen').value : null,
+        length: !blank && el('cLen').value ? +el('cLen').value : null,
         note: el('cNote').value,
         spot: S.spot ? S.spot.name : '',
         tide: st ? (st.rising ? 'Running in' : 'Running out') : null,
@@ -1429,8 +1598,70 @@
         parts: S.detail ? S.detail.parts.map(function (p) { return { key: p.key, f: Math.round(p.f * 100) / 100 }; }) : null
       });
       closeSheet(); renderLog();
-      alertBanner('Catch logged.', 'info');
+      if (S.settings.learn) { computeScores(); renderNow(); }
+      alertBanner(blank ? 'Blank session logged.' : 'Catch logged.', 'info');
     });
+  }
+
+  /* ================= share / export ================================== */
+
+  function shareText(text, title) {
+    if (navigator.share) return navigator.share({ title: title, text: text }).catch(function () {});
+    return (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+      .then(function () { alertBanner('Copied — paste it into a message.', 'info'); },
+            function () { openSheet('<h3>' + esc(title) + '</h3><pre style="white-space:pre-wrap;font:inherit;font-size:14px">' + esc(text) + '</pre>'); });
+  }
+
+  function shareConditions() {
+    if (!S.detail || !S.spot) return;
+    var d = S.detail, v = C.Score.verdict(d.score), L = [];
+    L.push(S.spot.name + ' — ' + fFull.format(new Date()) + ' ' + t(Date.now()));
+    L.push('Bite score ' + d.score + ' — ' + v.label);
+    var now = ['Wind ' + wv(d.wind) + ' ' + wu() + ' ' + C.degToCompass(d.dir) + (d.gust != null ? ' gusting ' + wv(d.gust) : '')];
+    if (d.wave != null) now.push('swell ' + n1(d.wave) + ' m' + (d.period ? ' ' + n0(d.period) + ' s' : ''));
+    if (d.sst != null) now.push('water ' + n1(d.sst) + '°');
+    if (d.pressure != null) now.push(n0(d.pressure) + ' hPa' + (d.pressureTrend != null ? (d.pressureTrend > 0.3 ? ' rising' : d.pressureTrend < -0.3 ? ' falling' : ' steady') : ''));
+    L.push(now.join(' · '));
+    if (S.tide) {
+      var st = C.Tides.state(S.tide, Date.now());
+      if (st) L.push('Tide ' + (st.rising ? 'running in' : 'running out') + ', ' + (st.next.type === 'high' ? 'high' : 'low') + ' ' + n1(st.next.h) + ' m at ' + t(st.next.t));
+    }
+    if (S.sol) {
+      var nx = S.sol.periods.filter(function (p) { return p.end.valueOf() > Date.now(); })[0];
+      if (nx) L.push('Next moon ' + nx.kind + ' ' + t(nx.start) + '–' + t(nx.end));
+    }
+    if (S.windows && S.windows.length) L.push('Best windows: ' + S.windows.slice(0, 3).map(function (w) {
+      return relDay(w.start) + ' ' + t(w.start) + '–' + t(w.end) + ' (' + w.peak + ')';
+    }).join(', '));
+    L.push(location.origin + location.pathname);
+    shareText(L.join('\n'), 'Dawson\u2019s Fish Finder Pro');
+  }
+
+  function shareLog() {
+    var l = C.Store.log(); if (!l.length) return;
+    var cols = ['date', 'time', 'species', 'length_cm', 'spot', 'tide', 'tide_m', 'wind_kt', 'wind_dir', 'pressure_hpa', 'water_c', 'moon_pct', 'moon_period', 'low_light', 'score', 'blank', 'notes'];
+    function q(v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    var rows = l.slice().reverse().map(function (e) {
+      return [fDate.format(new Date(e.t)) + ' ' + new Date(e.t).getFullYear(), t(e.t), e.species, e.length, e.spot, e.tide, e.tideHeight, e.wind,
+        e.windDir != null ? C.degToCompass(e.windDir) : '', e.pressure, e.sst, e.moon, e.moonPeriod ? 'yes' : 'no', e.lowLight ? 'yes' : 'no', e.score, e.blank ? 'yes' : 'no', e.note].map(q).join(',');
+    });
+    var csv = cols.join(',') + '\n' + rows.join('\n');
+    try {
+      var file = new File([csv], 'catch-log.csv', { type: 'text/csv' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: 'Catch log' }).catch(function () {}); return; }
+    } catch (e) {}
+    shareText(csv, 'Catch log');
+  }
+
+  function wipeApp() {
+    var b = el('wipeBtn');
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1'; b.textContent = 'Tap again to wipe everything on this phone'; b.classList.add('danger');
+      setTimeout(function () { b.dataset.armed = ''; b.textContent = 'Start fresh — wipe settings and log'; b.classList.remove('danger'); }, 6000);
+      return;
+    }
+    C.Store.wipe();
+    location.reload();
   }
 
   function dataStatus() {
@@ -1544,24 +1775,41 @@
   }
   function closeSheet() { el('sheet').classList.remove('on'); el('sheetBg').classList.remove('on'); }
 
+  function spotRow(s, favs) {
+    var fav = favs.indexOf(s.id) >= 0, note = C.Store.note(s.id);
+    return '<div class="spotrow"><button data-id="' + s.id + '"' + (S.spot && s.id === S.spot.id ? ' class="on"' : '') + '>' + esc(s.name) +
+      '<div class="r">' + s.kinds.map(function (k) { return D.KIND_NAME[k]; }).join(' · ') + (note ? ' · has notes' : '') + '</div></button>' +
+      '<button class="star' + (fav ? ' on' : '') + '" data-fav="' + s.id + '" aria-label="Favourite">' + (fav ? '★' : '☆') + '</button></div>';
+  }
+
   function openSpotPicker() {
-    var groups = {}, order = [];
+    var groups = {}, order = [], favs = C.Store.favs();
     D.SPOTS.forEach(function (s) {
       if (!groups[s.region]) { groups[s.region] = []; order.push(s.region); }
       groups[s.region].push(s);
     });
-    var html = '<h3>Pick a spot</h3><div class="sub">Or tap the target icon up top to use your location.</div>' +
+    var top = '';
+    var favSpots = favs.map(function (id) { return D.SPOTS[id]; }).filter(Boolean);
+    if (favSpots.length) top += '<div class="groupname">Favourites</div><div class="spotlist">' + favSpots.map(function (s) { return spotRow(s, favs); }).join('') + '</div>';
+    var rec = C.Store.recent().filter(function (id) { return favs.indexOf(id) < 0 && !(S.spot && S.spot.id === id); }).map(function (id) { return D.SPOTS[id]; }).filter(Boolean).slice(0, 3);
+    if (rec.length) top += '<div class="groupname">Recent</div><div class="spotlist">' + rec.map(function (s) { return spotRow(s, favs); }).join('') + '</div>';
+    var html = '<h3>Pick a spot</h3><div class="sub">Tap the star to keep a spot at the top. The target icon up top uses your location.</div>' +
       '<div class="field"><input type="text" id="spotSearch" placeholder="Search spots" autocomplete="off"></div>' +
+      '<div id="spotTop">' + top + '</div>' +
       '<div id="spotResults">' + order.map(function (r) {
-        return '<div class="groupname">' + esc(r) + '</div><div class="spotlist">' + groups[r].map(function (s) {
-          return '<button data-id="' + s.id + '"' + (S.spot && s.id === S.spot.id ? ' class="on"' : '') + '>' + esc(s.name) +
-            '<div class="r">' + s.kinds.map(function (k) { return D.KIND_NAME[k]; }).join(' · ') + '</div></button>';
-        }).join('') + '</div>';
+        return '<div class="groupname">' + esc(r) + '</div><div class="spotlist">' + groups[r].map(function (s) { return spotRow(s, favs); }).join('') + '</div>';
       }).join('') + '</div>' +
       '<div class="footnote" style="margin-top:16px">Settings, catch log and licence links live under the gear below.</div>' +
       '<button class="btn ghost" id="toSettings" style="margin-top:10px">Settings &amp; catch log</button>';
     openSheet(html);
-    el('spotResults').addEventListener('click', function (e) {
+    el('sheetBody').addEventListener('click', function (e) {
+      var f = e.target.closest('button[data-fav]');
+      if (f) {
+        var id = +f.dataset.fav, on = C.Store.favs().indexOf(id) < 0;
+        C.Store.toggleFav(id);
+        Array.prototype.forEach.call(el('sheetBody').querySelectorAll('button[data-fav="' + id + '"]'), function (x) { x.classList.toggle('on', on); x.textContent = on ? '★' : '☆'; });
+        return;
+      }
       var b = e.target.closest('button[data-id]'); if (!b) return;
       C.Store.saveSettings({ useGps: false });
       S.settings = C.Store.settings();
@@ -1570,7 +1818,8 @@
     el('toSettings').addEventListener('click', function () { closeSheet(); showView('me'); });
     el('spotSearch').addEventListener('input', function () {
       var q = this.value.toLowerCase();
-      Array.prototype.forEach.call(el('spotResults').querySelectorAll('.spotlist button'), function (b) {
+      el('spotTop').style.display = q ? 'none' : '';
+      Array.prototype.forEach.call(el('spotResults').querySelectorAll('.spotrow'), function (b) {
         b.style.display = b.textContent.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
       });
       Array.prototype.forEach.call(el('spotResults').querySelectorAll('.groupname'), function (g) {
