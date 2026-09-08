@@ -650,9 +650,10 @@
         seasonMult = v === 2 ? 1 : v === 1 ? 0.86 : 0.5;
       }
 
+      var isNight = !!(sun.sunrise && sun.sunset && (whenMs < sun.sunrise.valueOf() - 1800000 || whenMs > sun.sunset.valueOf() + 1800000));
       return {
         score: Math.round(clamp(base * seasonMult, 0, 1) * 100),
-        parts: parts, seasonMult: seasonMult,
+        parts: parts, seasonMult: seasonMult, isNight: isNight,
         wind: kt, gust: gust, dir: dir, pressure: pres,
         pressureTrend: (pres != null && pres3 != null) ? pres - pres3 : null,
         cloud: cloud, rain: rainNow, rain24: mm24, rain72: mm72,
@@ -768,7 +769,7 @@
       var phrase = {
         wind: function (f) { return f >= 0.72 ? 'Light wind' : 'Too much wind'; },
         pressure: function (f) { return f >= 0.72 ? (detail.pressureTrend != null && detail.pressureTrend < -0.5 ? 'Barometer falling — fish feed ahead of a change' : 'Steady barometer') : 'Barometer working against you'; },
-        light: function (f) { return f >= 0.72 ? 'Prime low light' : 'Wrong end of the day'; },
+        light: function (f) { return f >= 0.72 ? 'Prime low light' : (detail.isNight ? 'Dark — most species quieter' : 'Middle of the day'); },
         solunar: function (f) { return f >= 0.72 ? 'Inside a moon feeding period' : 'Between moon periods'; },
         tide: function (f) { return f >= 0.72 ? 'Good run of tide' : 'Tide barely moving'; },
         swell: function (f) { return f >= 0.72 ? 'Comfortable swell' : 'Swell too big'; },
