@@ -95,6 +95,9 @@
       });
     }
     setInterval(function () { if (S.wx) { computeScores(); renderNow(); } }, 5 * 60000);
+    setInterval(function () {
+      if (el('v-maps').classList.contains('on') && S.radarSource === 'bom' && S.liveRadar) bomBuild();
+    }, 5 * 60000);
   }
 
   function bindTabs() {
@@ -871,11 +874,28 @@
     else { if (S.map) S.map.render(); }
   }
 
+  /* BOM still serves the frame PNGs to a plain <img> from any site, so the
+     loop is loaded straight from the Bureau. The GitHub feed only supplies
+     the cadence (which minutes this radar publishes on) and the static map
+     layers, and stands in for any frame BOM will not hand over. */
+  function bomStamp(sec) {
+    var d = new Date(sec * 1000);
+    return d.toISOString().slice(0, 16).replace(/[-T:]/g, '');
+  }
+  function probeFrame(url) {
+    return new Promise(function (res) {
+      var im = new Image();
+      im.onload = function () { res(true); };
+      im.onerror = function () { res(false); };
+      im.src = url;
+    });
+  }
+
   function bomBuild() {
     var R = S.liveRadar; if (!R || !R.radars) return;
-    var ids = Object.keys(R.radars);
+    var ids = Object.keys(R.radars).filter(function (id) { return R.radars[id].frames && R.radars[id].frames.length; });
+    if (!ids.length) return;
     if (!S.bomRadarId || !R.radars[S.bomRadarId]) {
-      /* nearest radar to where he is */
       var best = null, bd = 1e9;
       ids.forEach(function (id) {
         var m = D.RADARS[id]; if (!m) return;
@@ -888,47 +908,79 @@
       var m = D.RADARS[id];
       return '<option value="' + id + '"' + (id === S.bomRadarId ? ' selected' : '') + '>' + esc(m ? m.name : id) + ' 128 km</option>';
     }).join('');
-    var r = R.radars[S.bomRadarId], base = C.Api.liveBase();
+    var r = R.radars[S.bomRadarId], base = C.Api.liveBase(), id = S.bomRadarId;
     var stage = el('bomStage');
-    var layers = ['background', 'topography', 'locations', 'range'].map(function (l) {
-      return r.layers && r.layers[l] ? '<img class="bl" src="' + base + r.layers[l] + '" alt="">' : '';
-    }).join('');
-    var frames = (r.frames || []).map(function (f, i) {
-      return '<img class="bf" data-i="' + i + '" src="' + base + f.file + '" alt="" style="opacity:0">';
-    }).join('');
-    /* he is here: BOM 128 km images are 512 px across 256 km, north up */
+    var m = D.RADARS[id];
     var dot = '';
-    var m = D.RADARS[S.bomRadarId];
     if (m) {
       var dy = (S.lat - m.lat) * 111.2, dx = (S.lon - m.lon) * 111.2 * Math.cos(m.lat * Math.PI / 180);
       var px = 50 + dx / 256 * 100, py = 50 - dy / 256 * 100;
       if (px > 2 && px < 98 && py > 2 && py < 98) dot = '<div class="bdot" style="left:' + px.toFixed(1) + '%;top:' + py.toFixed(1) + '%"></div>';
     }
-    stage.innerHTML = layers + frames + dot +
-      (r.layers && r.layers.legend ? '<img class="blegend" src="' + base + r.layers.legend + '" alt="">' : '');
-    el('bomScrub').max = String(Math.max(0, (r.frames || []).length - 1));
-    S.bomFrameIx = Math.max(0, (r.frames || []).length - 1);
-    el('bomMeta').textContent = 'Bureau of Meteorology ' + (m ? m.name : S.bomRadarId) + ' radar · frames every ' +
-      (r.stepMin || 6) + ' min · pulled ' + (R.fetched ? Math.round((Date.now() - R.fetched * 1000) / 60000) + ' min ago' : 'recently') +
-      '. Refreshes every 10 minutes.';
-    bomShow(); bomPlay();
+    var layers = ['background', 'topography', 'locations', 'range'].map(function (l) {
+      return r.layers && r.layers[l] ? '<img class="bl" src="' + base + r.layers[l] + '" alt="">' : '';
+    }).join('');
+    stage.innerHTML = layers + dot + (r.layers && r.layers.legend ? '<img class="blegend" src="' + base + r.layers.legend + '" alt="">' : '');
+    el('bomMeta').textContent = 'Checking the Bureau for the latest frames…';
+    bomStop();
+
+    /* cadence from the feed */
+    var known = r.frames.map(function (f) { return f.time; }).filter(Boolean).sort();
+    var step = (r.stepMin || 5) * 60;
+    var phase = known.length ? known[known.length - 1] % step : 0;
+    var now = Math.floor(Date.now() / 1000);
+    var latest = now - ((now - phase) % step + step) % step;
+    var cands = [];
+    for (var t = latest; t > now - 75 * 60 && cands.length < 14; t -= step) cands.push(t);
+
+    var token = (S.bomToken = (S.bomToken || 0) + 1);
+    Promise.all(cands.map(function (t) {
+      var url = 'https://www.bom.gov.au/radar/' + id + '.T.' + bomStamp(t) + '.png';
+      return probeFrame(url).then(function (ok) { return ok ? { time: t, src: url, live: true } : null; });
+    })).then(function (found) {
+      if (token !== S.bomToken) return;
+      var frames = found.filter(Boolean);
+      var direct = frames.length;
+      /* fill gaps and the failure case from the feed's copies */
+      r.frames.forEach(function (f) {
+        if (!frames.some(function (x) { return x.time === f.time; })) frames.push({ time: f.time, src: base + f.file, live: false });
+      });
+      frames.sort(function (a, b) { return a.time - b.time; });
+      frames = frames.slice(-8);
+      S.bomFrames = frames;
+      stage.querySelectorAll('.bf').forEach(function (n) { n.remove(); });
+      var legend = stage.querySelector('.blegend');
+      frames.forEach(function (f, i) {
+        var im = document.createElement('img');
+        im.className = 'bf'; im.alt = ''; im.style.opacity = '0'; im.dataset.i = i; im.src = f.src;
+        stage.insertBefore(im, legend || null);
+      });
+      el('bomScrub').max = String(Math.max(0, frames.length - 1));
+      S.bomFrameIx = Math.max(0, frames.length - 1);
+      var newest = frames.length ? frames[frames.length - 1].time : null;
+      el('bomMeta').textContent = 'Bureau of Meteorology ' + (m ? m.name : id) + ' radar · ' +
+        (direct ? 'live from BOM, latest frame ' + (newest ? Math.round((now - newest) / 60) : '?') + ' min old' :
+          'BOM would not serve frames directly — showing the feed\u2019s copies, ' + Math.round((now - (newest || now)) / 60) + ' min old') +
+        ' · every ' + Math.round(step / 60) + ' min.';
+      bomShow(); bomPlay();
+    });
   }
 
   function bomShow() {
-    var r = S.liveRadar && S.liveRadar.radars[S.bomRadarId]; if (!r) return;
+    var frames = S.bomFrames || []; if (!frames.length) return;
     var imgs = el('bomStage').querySelectorAll('.bf');
     Array.prototype.forEach.call(imgs, function (im, i) { im.style.opacity = i === S.bomFrameIx ? 1 : 0; });
     el('bomScrub').value = String(S.bomFrameIx);
-    var f = r.frames[S.bomFrameIx];
+    var f = frames[S.bomFrameIx];
     el('bomTime').textContent = f ? t(f.time * 1000) : '—';
   }
   function bomPlay() {
     S.bomPlaying = true; clearInterval(S.bomTimer);
     el('bomPlay').innerHTML = '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor" stroke="none"/></svg>';
     S.bomTimer = setInterval(function () {
-      var r = S.liveRadar && S.liveRadar.radars[S.bomRadarId]; if (!r || !r.frames.length) return;
-      S.bomFrameIx = (S.bomFrameIx + 1) % r.frames.length; bomShow();
-    }, S.bomFrameIx === (S.liveRadar.radars[S.bomRadarId].frames.length - 1) ? 1400 : 700);
+      var frames = S.bomFrames || []; if (!frames.length) return;
+      S.bomFrameIx = (S.bomFrameIx + 1) % frames.length; bomShow();
+    }, 700);
   }
   function bomStop() {
     S.bomPlaying = false; clearInterval(S.bomTimer);
@@ -1328,7 +1380,7 @@
     if (S.obs) row('Station', S.obs.ageMin != null && S.obs.ageMin < 90 ? 'ok' : 'warn', esc(S.obs.name) + ' · ' + S.obs.km + ' km · ' + (S.obs.ageMin != null ? S.obs.ageMin + ' min old' : 'age unknown'));
     else row('Station', 'warn', S.live ? 'No BOM station within 45 km yet — the feed maps more stations every 10 min' : 'Live feed not reachable');
     var nR = S.liveRadar && S.liveRadar.radars ? Object.keys(S.liveRadar.radars).length : 0;
-    row('BOM radar', nR ? 'ok' : 'warn', nR ? nR + ' radars · pulled ' + Math.round((Date.now() - S.liveRadar.fetched * 1000) / 60000) + ' min ago' : 'No frames yet — run “Live BOM feed” in GitHub Actions');
+    row('BOM radar', nR ? 'ok' : 'warn', nR ? nR + ' radars · frames load live from BOM; the feed (last ran ' + Math.round((Date.now() - S.liveRadar.fetched * 1000) / 60000) + ' min ago) supplies the map layers' : 'No frames yet — run “Live BOM feed” in GitHub Actions');
     row('Confidence', S.spread ? 'ok' : 'warn', S.spread ? S.spread.members + '-member ensemble' : 'Ensemble not available — windows show no confidence tag');
     return rows;
   }
