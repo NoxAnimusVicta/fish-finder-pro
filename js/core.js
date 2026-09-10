@@ -73,6 +73,16 @@
       if (text) Store._set('nf.note.' + id, text);
       else { try { localStorage.removeItem('nf.note.' + id); } catch (e) {} }
     },
+    /* places he added himself by searching (ids from 1000 up) */
+    customs: function () { return Store._get('nf.custom', []); },
+    addCustom: function (spot) {
+      var c = Store.customs();
+      spot.id = 1000 + c.reduce(function (m, x) { return Math.max(m, x.id - 1000 + 1); }, 0);
+      c.push(spot); Store._set('nf.custom', c); return spot;
+    },
+    removeCustom: function (id) {
+      Store._set('nf.custom', Store.customs().filter(function (x) { return x.id !== id; }));
+    },
     wipe: function () {
       try {
         var keys = [];

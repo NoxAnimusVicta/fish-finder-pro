@@ -157,7 +157,7 @@
       });
       el('fab').style.display = b.dataset.v === 'now' ? '' : 'none';
       window.scrollTo(0, 0);
-      if (b.dataset.v === 'maps') initRadar();
+      if (b.dataset.v === 'maps') syncMaps();
       if (b.dataset.v === 'tides') renderTides();
     });
     /* the settings pane has no tab of its own — the gear opens it */
@@ -186,6 +186,40 @@
     return 2 * R * Math.asin(Math.sqrt(h));
   }
 
+  function spotById(id) {
+    if (id == null) return null;
+    if (id >= 1000) return C.Store.customs().filter(function (x) { return x.id === id; })[0] || null;
+    return D.SPOTS[id] || null;
+  }
+
+  /* A place he searched for. Borrows tides, swell point and forecast district
+     from the nearest listed spot when it is close enough to share a coast;
+     otherwise it is treated as inland water. */
+  function makeCustomSpot(name, admin, lat, lon) {
+    var near = nearestSpot(lat, lon), rid = null, rd = 1e9;
+    Object.keys(D.RADARS).forEach(function (id) {
+      var d = haversine(lat, lon, D.RADARS[id].lat, D.RADARS[id].lon);
+      if (d < rd) { rd = d; rid = id; }
+    });
+    var coastal = near.spot && near.spot.port && near.km <= 25;
+    var sp = { name: name, region: (admin ? admin + ' · ' : '') + 'my place', lat: lat, lon: lon, custom: true, faces: null, radar: rid,
+      sea: coastal ? { lat: lat - 0.005, lon: near.spot.sea ? Math.max(near.spot.sea.lon, lon + 0.35) : lon + 0.4 } : null,
+      port: coastal ? near.spot.port : null, hwOff: coastal ? near.spot.hwOff : 0, lwOff: coastal ? near.spot.lwOff : 0,
+      district: coastal ? near.spot.district : null, kinds: coastal ? near.spot.kinds.slice() : ['f'], damped: coastal ? near.spot.damped : false,
+      note: coastal ? 'Tides and coastal forecast borrowed from ' + near.spot.name + ', ' + Math.round(near.km) + ' km away.' : 'Treated as inland water — no tides or swell.' };
+    if (coastal && sp.kinds.indexOf('f') >= 0 && sp.kinds.length > 1) sp.kinds = sp.kinds.filter(function (k) { return k !== 'f'; });
+    return C.Store.addCustom(sp);
+  }
+
+  /* everything on the Maps tab follows the current spot */
+  function syncMaps() {
+    if (!el('v-maps').classList.contains('on')) return;
+    initRadar();
+    if (S.mapMode === 'wind') setWindy('windyFrame', 'wind');
+    if (S.mapMode === 'waves') setWindy('waveFrame', 'waves');
+  }
+  function posKey() { return S.lat.toFixed(2) + ',' + S.lon.toFixed(2); }
+
   function nearestSpot(lat, lon, kindFilter) {
     var best = null, bd = 1e9;
     D.SPOTS.forEach(function (s) {
@@ -197,7 +231,7 @@
   }
 
   function setSpot(id, quiet) {
-    var s = D.SPOTS[id] || D.SPOTS[0];
+    var s = spotById(id) || D.SPOTS[0];
     S.spot = s; S.lat = s.lat; S.lon = s.lon; S.gpsFix = null;
     el('spotName').textContent = s.name;
     el('spotRegion').textContent = s.region;
@@ -457,7 +491,7 @@
   }
 
   function renderAll() {
-    renderNow(); renderForecast(); renderTides(); renderFish(); renderBestBets(); renderSettings(); renderBomLinks(); renderStatus();
+    renderNow(); renderForecast(); renderTides(); renderFish(); renderBestBets(); renderSettings(); renderBomLinks(); renderStatus(); syncMaps();
   }
 
   /* ================= NOW ============================================= */
@@ -1161,7 +1195,7 @@
     });
     el('bomPlay').addEventListener('click', function () { S.bomPlaying ? bomStop() : bomPlay(); });
     el('bomScrub').addEventListener('input', function () { bomStop(); S.bomFrameIx = +this.value; bomShow(); });
-    el('bomRadarPick').addEventListener('change', function () { S.bomRadarId = this.value; bomBuild(); });
+    el('bomRadarPick').addEventListener('change', function () { S.bomRadarId = this.value; S.bomRadarFor = posKey(); bomBuild(); });
     el('playBtn').addEventListener('click', togglePlay);
     el('scrub').addEventListener('input', function () {
       stopPlay(); S.frameIx = +this.value; showFrame();
@@ -1213,6 +1247,7 @@
     var R = S.liveRadar; if (!R || !R.radars) return;
     var ids = Object.keys(R.radars).filter(function (id) { return R.radars[id].frames && R.radars[id].frames.length; });
     if (!ids.length) return;
+    if (S.bomRadarFor !== posKey()) { S.bomRadarId = null; S.bomRadarFor = posKey(); }
     if (!S.bomRadarId || !R.radars[S.bomRadarId]) {
       var best = null, bd = 1e9;
       ids.forEach(function (id) {
@@ -1224,7 +1259,8 @@
     }
     el('bomRadarPick').innerHTML = ids.map(function (id) {
       var m = D.RADARS[id];
-      return '<option value="' + id + '"' + (id === S.bomRadarId ? ' selected' : '') + '>' + esc(m ? m.name : id) + ' 128 km</option>';
+      var km = m ? Math.round(C.haversine(S.lat, S.lon, m.lat, m.lon)) : null;
+      return '<option value="' + id + '"' + (id === S.bomRadarId ? ' selected' : '') + '>' + esc(m ? m.name : id) + (km != null ? ' · ' + km + ' km away' : '') + '</option>';
     }).join('');
     var r = R.radars[S.bomRadarId], base = C.Api.liveBase(), id = S.bomRadarId;
     var stage = el('bomStage');
@@ -1276,7 +1312,9 @@
       el('bomScrub').max = String(Math.max(0, frames.length - 1));
       S.bomFrameIx = Math.max(0, frames.length - 1);
       var newest = frames.length ? frames[frames.length - 1].time : null;
-      el('bomMeta').textContent = 'Bureau of Meteorology ' + (m ? m.name : id) + ' radar · ' +
+      var farKm = m ? Math.round(C.haversine(S.lat, S.lon, m.lat, m.lon)) : 0;
+      el('bomMeta').textContent = (farKm > 150 ? 'This spot is ' + farKm + ' km from the ' + m.name + ' radar — outside its 128 km picture. Use Map view for rain here. ' : '') +
+        'Bureau of Meteorology ' + (m ? m.name : id) + ' radar · ' +
         (direct ? 'live from BOM, latest frame ' + (newest ? Math.round((now - newest) / 60) : '?') + ' min old' :
           'BOM would not serve frames directly — showing the feed\u2019s copies, ' + Math.round((now - (newest || now)) / 60) + ' min old') +
         ' · every ' + Math.round(step / 60) + ' min.';
@@ -1312,10 +1350,9 @@
       buildMapLayers();
     }
     S.map.setMarkers([{ lat: S.lat, lon: S.lon, cls: S.gpsFix ? 'me' : '' }]);
-    if (S.mapSpot !== (S.spot ? S.spot.id : -1) || !S.mapCentred) {
+    if (S.mapFor !== posKey()) {
       S.map.setView(S.lat, S.lon, S.map.z);
-      S.mapSpot = S.spot ? S.spot.id : -1;
-      S.mapCentred = true;
+      S.mapFor = posKey();
     }
     if (!S.frames.length) loadRadar();
   }
@@ -1905,6 +1942,7 @@
   }
 
   function openSheet(html) {
+    el('sheetBody').onclick = null;
     el('sheetBody').innerHTML = html;
     el('sheet').classList.add('on'); el('sheetBg').classList.add('on');
     el('sheet').scrollTop = 0;
@@ -1915,7 +1953,8 @@
     var fav = favs.indexOf(s.id) >= 0, note = C.Store.note(s.id);
     return '<div class="spotrow"><button data-id="' + s.id + '"' + (S.spot && s.id === S.spot.id ? ' class="on"' : '') + '>' + esc(s.name) +
       '<div class="r">' + s.kinds.map(function (k) { return D.KIND_NAME[k]; }).join(' · ') + (note ? ' · has notes' : '') + '</div></button>' +
-      '<button class="star' + (fav ? ' on' : '') + '" data-fav="' + s.id + '" aria-label="Favourite">' + (fav ? '★' : '☆') + '</button></div>';
+      '<button class="star' + (fav ? ' on' : '') + '" data-fav="' + s.id + '" aria-label="Favourite">' + (fav ? '★' : '☆') + '</button>' +
+      (s.custom ? '<button class="star" data-rm="' + s.id + '" aria-label="Remove">✕</button>' : '') + '</div>';
   }
 
   function openSpotPicker() {
@@ -1925,12 +1964,15 @@
       groups[s.region].push(s);
     });
     var top = '';
-    var favSpots = favs.map(function (id) { return D.SPOTS[id]; }).filter(Boolean);
+    var favSpots = favs.map(spotById).filter(Boolean);
     if (favSpots.length) top += '<div class="groupname">Favourites</div><div class="spotlist">' + favSpots.map(function (s) { return spotRow(s, favs); }).join('') + '</div>';
-    var rec = C.Store.recent().filter(function (id) { return favs.indexOf(id) < 0 && !(S.spot && S.spot.id === id); }).map(function (id) { return D.SPOTS[id]; }).filter(Boolean).slice(0, 3);
+    var rec = C.Store.recent().filter(function (id) { return favs.indexOf(id) < 0 && !(S.spot && S.spot.id === id); }).map(spotById).filter(Boolean).slice(0, 3);
     if (rec.length) top += '<div class="groupname">Recent</div><div class="spotlist">' + rec.map(function (s) { return spotRow(s, favs); }).join('') + '</div>';
+    var customs = C.Store.customs();
+    if (customs.length) top += '<div class="groupname">My places</div><div class="spotlist">' + customs.map(function (s) { return spotRow(s, favs); }).join('') + '</div>';
     var html = '<h3>Pick a spot</h3><div class="sub">Tap the star to keep a spot at the top. The target icon up top uses your location.</div>' +
-      '<div class="field"><input type="text" id="spotSearch" placeholder="Search spots" autocomplete="off"></div>' +
+      '<div class="field"><input type="text" id="spotSearch" placeholder="Search spots, or any town in Australia" autocomplete="off"></div>' +
+      '<div id="geo"></div>' +
       '<div id="spotTop">' + top + '</div>' +
       '<div id="spotResults">' + order.map(function (r) {
         return '<div class="groupname">' + esc(r) + '</div><div class="spotlist">' + groups[r].map(function (s) { return spotRow(s, favs); }).join('') + '</div>';
@@ -1938,7 +1980,7 @@
       '<div class="footnote" style="margin-top:16px">Settings, catch log and licence links live under the gear below.</div>' +
       '<button class="btn ghost" id="toSettings" style="margin-top:10px">Settings &amp; catch log</button>';
     openSheet(html);
-    el('sheetBody').addEventListener('click', function (e) {
+    el('sheetBody').onclick = function (e) {
       var f = e.target.closest('button[data-fav]');
       if (f) {
         var id = +f.dataset.fav, on = C.Store.favs().indexOf(id) < 0;
@@ -1946,15 +1988,51 @@
         Array.prototype.forEach.call(el('sheetBody').querySelectorAll('button[data-fav="' + id + '"]'), function (x) { x.classList.toggle('on', on); x.textContent = on ? '★' : '☆'; });
         return;
       }
+      var rm = e.target.closest('button[data-rm]');
+      if (rm) {
+        var rid = +rm.dataset.rm;
+        C.Store.removeCustom(rid);
+        if (C.Store.favs().indexOf(rid) >= 0) C.Store.toggleFav(rid);
+        if (S.spot && S.spot.id === rid) { S.settings = C.Store.saveSettings({ spot: 58 }); setSpot(58); }
+        closeSheet(); setTimeout(openSpotPicker, 250);
+        return;
+      }
+      var g = e.target.closest('button[data-geo]');
+      if (g) {
+        var r = S.geoResults && S.geoResults[+g.dataset.geo]; if (!r) return;
+        var sp = makeCustomSpot(r.name, r.admin1 || '', r.latitude, r.longitude);
+        C.Store.saveSettings({ useGps: false }); S.settings = C.Store.settings();
+        setSpot(sp.id); closeSheet();
+        alertBanner('Added ' + esc(sp.name) + ' to your places. ' + esc(sp.note), 'info');
+        return;
+      }
       var b = e.target.closest('button[data-id]'); if (!b) return;
       C.Store.saveSettings({ useGps: false });
       S.settings = C.Store.settings();
       setSpot(+b.dataset.id); closeSheet();
-    });
+    };
     el('toSettings').addEventListener('click', function () { closeSheet(); showView('me'); });
+    var geoTimer = null;
+    function geocode(q) {
+      var box = el('geo'); if (!box) return;
+      box.innerHTML = '<div class="muted" style="margin:6px 0 10px">Searching Australia for “' + esc(q) + '”…</div>';
+      var url = 'https://geocoding-api.open-meteo.com/v1/search?name=' + encodeURIComponent(q) + '&count=6&language=en&format=json&countryCode=AU';
+      fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+        if (!el('geo') || el('spotSearch').value.trim() !== q) return;
+        var res = (j.results || []).filter(function (r) { return r.latitude != null; });
+        S.geoResults = res;
+        el('geo').innerHTML = res.length ? '<div class="groupname">Anywhere in Australia</div><div class="spotlist">' + res.map(function (r, i) {
+          return '<button data-geo="' + i + '">' + esc(r.name) + '<div class="r">' + esc([r.admin2, r.admin1].filter(Boolean).join(', ')) + ' · add to my places</div></button>';
+        }).join('') + '</div>' : '<div class="muted" style="margin:6px 0 10px">Nothing by that name in Australia.</div>';
+      }).catch(function () { if (el('geo')) el('geo').innerHTML = '<div class="muted" style="margin:6px 0 10px">Could not reach the place search — check the signal.</div>'; });
+    }
     el('spotSearch').addEventListener('input', function () {
       var q = this.value.toLowerCase();
       el('spotTop').style.display = q ? 'none' : '';
+      clearTimeout(geoTimer);
+      var raw = this.value.trim();
+      if (raw.length >= 3) geoTimer = setTimeout(function () { geocode(raw); }, 500);
+      else el('geo').innerHTML = '';
       Array.prototype.forEach.call(el('spotResults').querySelectorAll('.spotrow'), function (b) {
         b.style.display = b.textContent.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
       });
