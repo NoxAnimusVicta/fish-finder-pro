@@ -26,7 +26,7 @@ UAS = [
     f"DawsonsFishFinder/1.0 (personal, non-commercial; +https://github.com/{REPO})",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",
 ]
-RADARS = ["IDR713", "IDR033", "IDR043", "IDR403", "IDR283", "IDR553", "IDR693", "IDR963"]
+RADARS = ["IDR713", "IDR033", "IDR043", "IDR403", "IDR283", "IDR553", "IDR693", "IDR963", "IDR663", "IDR683"]
 KEEP_FRAMES = 8
 MAX_STATION_LOOKUPS = 80
 
