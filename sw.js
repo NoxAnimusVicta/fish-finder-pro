@@ -1,5 +1,5 @@
 /* Offline shell. Bump CACHE when you change any file below. */
-const CACHE = 'dffp-v13';
+const CACHE = 'dffp-v14';
 const SHELL = [
   './',
   './index.html',
@@ -16,7 +16,16 @@ const SHELL = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  /* Fetch each shell file with a version query so a stale copy at the CDN
+     edge (GitHub Pages lags a few minutes after a commit) is never what gets
+     frozen into the new cache; store it under the bare path the page asks for. */
+  e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(p => {
+    const bust = p + (p.includes('?') ? '&' : '?') + 'v=' + CACHE;
+    return fetch(bust, { cache: 'reload' }).then(r => {
+      if (!r.ok) throw new Error('shell ' + p + ' ' + r.status);
+      return c.put(new Request(p), r);
+    });
+  }))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
