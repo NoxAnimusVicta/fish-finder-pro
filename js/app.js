@@ -1191,7 +1191,7 @@
     el('radarSrc').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-rs]'); if (!b) return;
       Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); });
-      S.radarSource = b.dataset.rs; showRadarSource();
+      S.radarSourceUser = b.dataset.rs; showRadarSource();
     });
     el('bomPlay').addEventListener('click', function () { S.bomPlaying ? bomStop() : bomPlay(); });
     el('bomScrub').addEventListener('input', function () { bomStop(); S.bomFrameIx = +this.value; bomShow(); });
@@ -1216,13 +1216,15 @@
 
   function showRadarSource() {
     var haveBom = !!(S.liveRadar && S.liveRadar.radars && Object.keys(S.liveRadar.radars).length);
-    if (!haveBom && S.radarSource === 'bom') S.radarSource = 'rv';
-    el('bomPane').style.display = S.radarSource === 'bom' ? '' : 'none';
-    el('rvPane').style.display = S.radarSource === 'rv' ? '' : 'none';
-    Array.prototype.forEach.call(el('radarSrc').children, function (x) { x.classList.toggle('on', x.dataset.rs === S.radarSource); });
+    /* his choice is remembered; the feed arriving late must not flip it */
+    var eff = haveBom ? (S.radarSourceUser || 'bom') : 'rv';
+    S.radarSource = eff;
+    el('bomPane').style.display = eff === 'bom' ? '' : 'none';
+    el('rvPane').style.display = eff === 'rv' ? '' : 'none';
+    Array.prototype.forEach.call(el('radarSrc').children, function (x) { x.classList.toggle('on', x.dataset.rs === eff); });
     el('radarSrc').children[0].disabled = !haveBom;
     el('radarSrc').children[0].style.opacity = haveBom ? '' : '.4';
-    if (S.radarSource === 'bom') bomBuild();
+    if (eff === 'bom') bomBuild();
     else { if (S.map) S.map.render(); }
   }
 
@@ -1275,7 +1277,7 @@
       return r.layers && r.layers[l] ? '<img class="bl" src="' + base + r.layers[l] + '" alt="">' : '';
     }).join('');
     stage.innerHTML = layers + dot + (r.layers && r.layers.legend ? '<img class="blegend" src="' + base + r.layers.legend + '" alt="">' : '');
-    el('bomMeta').textContent = 'Checking the Bureau for the latest frames…';
+    el('radarMeta').textContent = 'Checking the Bureau for the latest frames…';
     bomStop();
 
     /* cadence from the feed */
@@ -1313,7 +1315,7 @@
       S.bomFrameIx = Math.max(0, frames.length - 1);
       var newest = frames.length ? frames[frames.length - 1].time : null;
       var farKm = m ? Math.round(C.haversine(S.lat, S.lon, m.lat, m.lon)) : 0;
-      el('bomMeta').textContent = (farKm > 150 ? 'This spot is ' + farKm + ' km from the ' + m.name + ' radar — outside its 128 km picture. Use Map view for rain here. ' : '') +
+      el('radarMeta').textContent = (farKm > 150 ? 'This spot is ' + farKm + ' km from the ' + m.name + ' radar — outside its 128 km picture. Use Map view for rain here. ' : '') +
         'Bureau of Meteorology ' + (m ? m.name : id) + ' radar · ' +
         (direct ? 'live from BOM, latest frame ' + (newest ? Math.round((now - newest) / 60) : '?') + ' min old' :
           'BOM would not serve frames directly — showing the feed\u2019s copies, ' + Math.round((now - (newest || now)) / 60) + ' min old') +
