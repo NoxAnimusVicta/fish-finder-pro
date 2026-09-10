@@ -1249,6 +1249,10 @@
     var R = S.liveRadar; if (!R || !R.radars) return;
     var ids = Object.keys(R.radars).filter(function (id) { return R.radars[id].frames && R.radars[id].frames.length; });
     if (!ids.length) return;
+    ids.sort(function (a, b) {
+      var ma = D.RADARS[a], mb = D.RADARS[b];
+      return (ma ? C.haversine(S.lat, S.lon, ma.lat, ma.lon) : 1e9) - (mb ? C.haversine(S.lat, S.lon, mb.lat, mb.lon) : 1e9);
+    });
     if (S.bomRadarFor !== posKey()) { S.bomRadarId = null; S.bomRadarFor = posKey(); }
     if (!S.bomRadarId || !R.radars[S.bomRadarId]) {
       var best = null, bd = 1e9;
