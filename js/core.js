@@ -265,9 +265,9 @@
     /* BOM's own ensemble (ACCESS-GE) for spread, i.e. how sure the model is. */
     ensemble: function (lat, lon) {
       var base = 'https://ensemble-api.open-meteo.com/v1/ensemble?latitude=' + round4(lat) +
-        '&longitude=' + round4(lon) + '&hourly=wind_speed_10m,wind_gusts_10m' +
+        '&longitude=' + round4(lon) + '&hourly=wind_speed_10m,wind_gusts_10m,precipitation' +
         '&timezone=' + encodeURIComponent(TZ) + '&timeformat=unixtime&wind_speed_unit=kn&forecast_days=7';
-      var key = 'ens.' + round4(lat) + ',' + round4(lon);
+      var key = 'ens2.' + round4(lat) + ',' + round4(lon);
       return cachedJson(key, base + '&models=bom_access_global_ensemble', 120).catch(function () {
         return cachedJson(key + '.ec', base + '&models=ecmwf_ifs025', 120);
       });
@@ -358,6 +358,26 @@
       return { time: T, sd: out, members: keys.length };
     },
     at: function (sp, whenMs) { return sp ? sampleSeries(sp.time, sp.sd, whenMs) : null; },
+    /* Chance of rain the way the Bureau means it: the share of ensemble
+       members putting measurable rain (>= 0.2 mm over 3 h) on that hour. */
+    rain: function (ens) {
+      if (!ens || !ens.hourly || !ens.hourly.time) return null;
+      var H = ens.hourly, keys = Object.keys(H).filter(function (k) { return /^precipitation/.test(k); });
+      if (keys.length < 3) return null;
+      var T = H.time, out = [];
+      for (var i = 0; i < T.length; i++) {
+        var n = 0, wet = 0;
+        for (var k = 0; k < keys.length; k++) {
+          var a = H[keys[k]], v = 0, any = false;
+          for (var j = Math.max(0, i - 1); j <= Math.min(T.length - 1, i + 1); j++) { if (a[j] != null) { v += a[j]; any = true; } }
+          if (!any) continue;
+          n++; if (v >= 0.2) wet++;
+        }
+        out.push(n > 2 ? Math.round(100 * wet / n) : null);
+      }
+      return { time: T, pct: out };
+    },
+    rainAt: function (r, whenMs) { return r ? sampleNearest(r.time, r.pct, whenMs) : null; },
     label: function (sd) {
       if (sd == null) return null;
       if (sd < 2.5) return { text: 'High confidence', tone: 'great' };

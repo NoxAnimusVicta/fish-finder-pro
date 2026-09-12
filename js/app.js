@@ -12,7 +12,7 @@
     live: null, liveRadar: null, obs: null, obsDelta: null, ens: null, spread: null, learned: null,
     bomRadarId: null, bomFrameIx: 0, bomPlaying: false, bomTimer: null, radarSource: 'bom',
     series: [], windows: [], detail: null,
-    tideDay: 0, mapMode: 'radar', base: 'map',
+    tideDay: 0, mapMode: 'radar', base: 'map', scrollMemo: {},
     radar: null, frames: [], frameIx: 0, playing: false, timer: null,
     loading: false, lastError: null, stale: false
   };
@@ -123,6 +123,7 @@
     el('restoreBtn').addEventListener('click', restore);
     window.DFFP = { S: S, planDay: planDay, bestBets: function () { return S.bets; }, recompute: function () { computeScores(); renderAll(); } };
     bindPullToRefresh();
+    seg('wwRange', 'h', function (v) { C.Store._set('nf.wwHours', +v); renderWindWave(); renderWaveChart(); });
     document.addEventListener('visibilitychange', function () {
       if (document.hidden || !S.wx) return;
       if (S.wxAt && Date.now() - S.wxAt > 20 * 60000) load(true);
@@ -150,13 +151,15 @@
     tabs.addEventListener('click', function (e) {
       var b = e.target.closest('button[data-v]'); if (!b) return;
       if (b.classList.contains('on') && el('v-' + b.dataset.v).classList.contains('on')) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+      var cur = document.querySelector('.view.on');
+      if (cur) S.scrollMemo[cur.id] = window.scrollY;
       C.Store._set('nf.tab', b.dataset.v);
       Array.prototype.forEach.call(tabs.children, function (x) { x.classList.toggle('on', x === b); });
       ['now', 'forecast', 'tides', 'maps', 'fish', 'lb', 'me'].forEach(function (v) {
         var node = el('v-' + v); if (node) node.classList.toggle('on', v === b.dataset.v);
       });
       el('fab').style.display = b.dataset.v === 'now' ? '' : 'none';
-      window.scrollTo(0, 0);
+      window.scrollTo(0, S.scrollMemo['v-' + b.dataset.v] || 0);
       if (b.dataset.v === 'maps') syncMaps();
       if (b.dataset.v === 'tides') renderTides();
     });
@@ -281,7 +284,7 @@
   }
 
   function locate(explicit) {
-    if (!navigator.geolocation) { if (explicit) alertBanner('This browser will not share a location.'); return; }
+    if (!navigator.geolocation) { if (explicit) toast('This browser will not share a location'); return; }
     el('gpsBtn').classList.add('spin');
     navigator.geolocation.getCurrentPosition(function (pos) {
       el('gpsBtn').classList.remove('spin');
@@ -313,9 +316,17 @@
       load(true);
     }, function () {
       el('gpsBtn').classList.remove('spin');
-      if (explicit) alertBanner('Could not get a location fix. Pick a spot from the list instead.');
+      if (explicit) toast('No location fix — pick a spot from the list instead');
       if (!S.wx) load(false);
     }, { enableHighAccuracy: false, timeout: 9000, maximumAge: 300000 });
+  }
+
+  /* short confirmations at the thumb, not at the top of a scrolled page */
+  function toast(msg) {
+    var tst = el('toast'); if (!tst) return;
+    tst.textContent = msg; tst.classList.add('show');
+    clearTimeout(S.toastTimer);
+    S.toastTimer = setTimeout(function () { tst.classList.remove('show'); }, 2600);
   }
 
   function alertBanner(msg, kind) {
@@ -333,6 +344,7 @@
     if (S.loading) { S.reload = true; return; }
     S.reload = false;
     S.loading = true;
+    document.body.classList.add('loading');
     el('refreshBtn').classList.add('spin');
     var sp = S.spot;
     var sea = sp && sp.sea ? sp.sea : null;
@@ -344,6 +356,7 @@
       C.Api.local('tides.json').then(function (j) { S.bomTides = j; }).catch(function () {}),
       C.Api.live('obs.json').then(function (r) { S.live = r.data; }).catch(function () { S.live = null; }),
       C.Api.live('radar.json', 3).then(function (r) { S.liveRadar = r.data; }).catch(function () { S.liveRadar = null; }),
+      C.Api.live('history.json', 4).then(function (r) { S.history = r.data; }).catch(function () { S.history = S.history || null; }),
       C.Api.ensemble(S.lat, S.lon).then(function (r) { S.ens = r.data; }).catch(function () { S.ens = null; })
     ];
     if (sea) {
@@ -354,11 +367,13 @@
     Promise.all(jobs).then(function () {
       S.loading = false;
       if (S.reload) { S.reload = false; load(true); return; }
+      document.body.classList.remove('loading');
       el('refreshBtn').classList.remove('spin');
       buildTide();
       S.obs = C.Obs.nearest(S.live, S.lat, S.lon, 45);
       S.obsDelta = S.wx && S.obs ? C.Obs.apply(S.wx, S.obs, 6) : null;
       S.spread = C.Ensemble.spread(S.ens);
+      S.rain = C.Ensemble.rain(S.ens);
       if (!S.wx) {
         el('verdict').textContent = 'No forecast yet';
         el('verdictSub').textContent = 'Check your connection and hit refresh.';
@@ -415,7 +430,7 @@
     if (!sp || sp.kinds.length < 2) { seg.style.display = 'none'; return; }
     var cur = sp.kinds.indexOf(S.settings.kind) >= 0 ? S.settings.kind : '';
     seg.style.display = '';
-    seg.innerHTML = '<button data-k=""' + (cur === '' ? ' class="on"' : '') + '>Anywhere</button>' + sp.kinds.map(function (k) {
+    seg.innerHTML = '<button data-k=""' + (cur === '' ? ' class="on"' : '') + '>Any water</button>' + sp.kinds.map(function (k) {
       return '<button data-k="' + k + '"' + (cur === k ? ' class="on"' : '') + '>' + D.KIND_NAME[k] + '</button>';
     }).join('');
     seg.onclick = function (e) {
@@ -509,7 +524,23 @@
   function renderNow() {
     if (!S.detail) return;
     var d = S.detail, v = C.Score.verdict(d.score);
-    el('dial').innerHTML = dialSvg(d.score);
+    var prev = S.shownScore;
+    el('dial').innerHTML = dialSvg(prev != null ? prev : d.score);
+    if (prev != null && prev !== d.score) {
+      /* let the arc transition, and count the number across */
+      var arc = el('dial').querySelector('circle:last-child'), numEl = el('dial').querySelector('.num b');
+      var circ = 2 * Math.PI * 52, from = prev, to = d.score, t0 = performance.now();
+      requestAnimationFrame(function () {
+        arc.setAttribute('stroke-dasharray', (circ * to / 100).toFixed(1) + ' ' + circ.toFixed(1));
+        arc.setAttribute('stroke', scoreColor(to));
+        (function step(now) {
+          var f = Math.min(1, (now - t0) / 550), e = 1 - Math.pow(1 - f, 3);
+          numEl.textContent = Math.round(from + (to - from) * e);
+          if (f < 1) requestAnimationFrame(step);
+        })(t0);
+      });
+    }
+    S.shownScore = d.score;
     el('verdict').textContent = v.label;
     el('verdict').style.color = toneColor(v.tone);
 
@@ -537,8 +568,8 @@
     if (sp && d.seasonMult < 1) foot.push(sp + ' is ' + (d.seasonMult < 0.6 ? 'well out of its main run' : 'a bit off its peak') + ' this month.');
     if (S.stale) foot.push('Showing the last forecast that downloaded (' + t(S.wxAt) + ').');
     else if (S.wxAt) foot.push('Updated ' + t(S.wxAt) + '.');
-    foot.push('Model: ' + (S.fellBack ? 'best available (BOM model unavailable)'
-      : S.settings.model === 'bom_access_global' ? 'BOM ACCESS-G' : 'best available'));
+    foot.push('Model: ' + (S.fellBack ? 'multi-model blend (ACCESS-G feed empty right now)'
+      : S.settings.model === 'bom_access_global' ? 'BOM ACCESS-G' : 'multi-model blend'));
     el('scoreFoot').textContent = foot.join(' ');
 
     /* hazard + warning banners */
@@ -630,7 +661,7 @@
     var bits = [];
     if (d && d.pressureTrend != null) bits.push(d.pressureTrend <= -0.6 ? 'Falling ' + n1(Math.abs(d.pressureTrend)) + ' hPa over 3 h — the classic pre-front feed'
       : d.pressureTrend >= 0.5 ? 'Rising ' + n1(d.pressureTrend) + ' hPa over 3 h — fish often go quiet behind a change' : 'Steady over the last 3 h');
-    if (p24 != null && d && d.pressure != null) bits.push(n0(p24) + ' → ' + n0(d.pressure) + ' hPa since yesterday');
+    if (p24 != null && d && d.pressure != null) bits.push(Math.abs(d.pressure - p24) < 1 ? 'about the same as this time yesterday (' + n0(d.pressure) + ' hPa)' : n0(p24) + ' → ' + n0(d.pressure) + ' hPa since yesterday');
     if (n24 != null && d && d.pressure != null && Math.abs(n24 - d.pressure) >= 2) bits.push('heading to ' + n0(n24) + ' by tomorrow');
     el('baroNote').innerHTML = bits.join(' · ') + (S.obs && S.obs.pressure != null ? ' · <span style="color:var(--accent2)">●</span> station reading' : '');
   }
@@ -659,6 +690,113 @@
       '</div>' +
       (d && (Math.abs(d.wind) >= 3 || Math.abs(d.pressure) >= 1.5) ?
         '<div class="muted" style="margin-top:8px">The next six hours of the forecast have been nudged toward what the station is reading. The model gets the rest.</div>' : '');
+    var hist = S.history && S.history.stations && S.history.stations[o.id];
+    var sc = el('stationChart');
+    if (hist && hist.data && hist.data.length > 2 && typeof WindCharts !== 'undefined') {
+      WindCharts.liveWind(sc, hist.data, chartOpts({ hours: 6, compact: true, now: hist.data[hist.data.length - 1][0] * 1000 }));
+      sc.style.display = '';
+    } else { sc.innerHTML = ''; sc.style.display = 'none'; }
+  }
+
+  /* shared options for the Seabreeze-style charts */
+  var fDayLong = new Intl.DateTimeFormat('en-AU', { timeZone: TZ, weekday: 'long' });
+  function chartOpts(extra) {
+    var sunCache = {};
+    var o = {
+      now: Date.now(), unit: S.settings.unitsWind, tz: TZ,
+      fmtTime: function (ms) { return t(ms); },
+      fmtDay: function (ms) { return dayName(ms); },
+      fmtDayLong: function (ms) { return fDayLong.format(new Date(ms)); },
+      dayStart: function (ms) { return A.startOfLocalDay(new Date(ms), TZ).valueOf(); },
+      sun: function (ms) {
+        var p = A.parts(new Date(ms), TZ), k = p.year + '-' + p.month + '-' + p.day;
+        if (!sunCache[k]) sunCache[k] = A.sunTimes(new Date(ms), S.lat, S.lon, TZ);
+        return sunCache[k];
+      },
+      icon: function (code, night) { return wxIcon(code, night); },
+      desc: function (code) { return wx(code)[0]; }
+    };
+    for (var k in extra) o[k] = extra[k];
+    return o;
+  }
+
+  function wwHours() { return +(C.Store._get('nf.wwHours', 96)) || 96; }
+
+  function renderWindWave() {
+    var box = el('wwChart'); if (!box || !S.wx || typeof WindCharts === 'undefined') return;
+    var H = S.wx.hourly, M = S.marine && S.marine.hourly, hours = wwHours();
+    setSeg('wwRange', 'h', hours);
+    var rainPct = null;
+    if (S.rain) { rainPct = H.time.map(function (ts) { return C.Ensemble.rainAt(S.rain, ts * 1000); }); }
+    var wave = null, per = null, wdir = null;
+    if (M && M.wave_height) {
+      wave = H.time.map(function (ts) { return C.sampleSeries(M.time, M.wave_height, ts * 1000); });
+      per = H.time.map(function (ts) { return C.sampleSeries(M.time, M.swell_wave_period, ts * 1000); });
+      wdir = H.time.map(function (ts) { return C.sampleSeries(M.time, M.swell_wave_direction, ts * 1000); });
+    }
+    var D2 = S.wx.daily || {};
+    WindCharts.windWave(box, {
+      time: H.time, wind: H.wind_speed_10m, gust: H.wind_gusts_10m, dir: H.wind_direction_10m,
+      wave: wave, wavePeriod: per, waveDir: wdir, code: H.weather_code, rainPct: rainPct, rainMm: H.precipitation,
+      daily: { time: D2.time || [], code: D2.weather_code || [], tmin: D2.temperature_2m_min || [], tmax: D2.temperature_2m_max || [] }
+    }, chartOpts({ hours: hours, stepHours: hours <= 48 ? 1 : (hours <= 96 ? 2 : 3), fmtDay: function (ms) { return hours <= 48 ? fDayLong.format(new Date(ms)) : dayName(ms); } }));
+    el('wwNote').textContent = (S.fellBack ? 'Multi-model blend' : (S.settings.model === 'bom_access_global' ? 'BOM ACCESS-G' : 'Multi-model blend')) +
+      ' wind at 10 m' + (wave ? ', waves from the open-water point off ' + (S.spot ? S.spot.name : 'the spot') : '') +
+      (S.rain ? ', chance of rain from BOM’s ' + (S.spread ? S.spread.members : '') + '-member ensemble' : '') + '. Arrows point where the wind is going — touch and drag for the detail.';
+  }
+
+  function renderWaveChart() {
+    var card = el('swCard'), box = el('swChart'); if (!card || typeof WindCharts === 'undefined') return;
+    var M = S.marine && S.marine.hourly;
+    if (!M || !M.wave_height || !S.spot || !S.spot.sea) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    var hours = wwHours();
+    WindCharts.waveChart(box, { time: M.time, wave: M.wave_height, swell: M.swell_wave_height, swellPeriod: M.swell_wave_period,
+      swellDir: M.swell_wave_direction, windWave: M.wind_wave_height, period: M.wave_period },
+      chartOpts({ hours: hours, stepHours: hours <= 48 ? 2 : (hours <= 96 ? 3 : 6), limit: S.settings.swellLimit }));
+    el('swNote').textContent = 'Open-water point about ' + Math.round(C.haversine(S.spot.lat, S.spot.lon, S.spot.sea.lat, S.spot.sea.lon) + (S.marineKm || 0)) + ' km off ' + S.spot.name +
+      '. Arrows show where the swell is heading, placed on the period scale. Inside a bay or estuary it will be smaller than this.';
+  }
+
+  function stationFavs() { return C.Store._get('nf.stationFavs', []); }
+
+  function renderLiveWind() {
+    var card = el('lwCard'), box = el('liveWind'); if (!card || typeof WindCharts === 'undefined') return;
+    var Hs = S.history && S.history.stations;
+    if (!Hs || !Object.keys(Hs).length) {
+      card.style.display = '';
+      box.innerHTML = '<div class="empty">' + (S.history ? 'No coastal station within reach has published readings yet.' : 'Live station history is not reachable right now — it comes from the BOM feed every ten minutes.') + '</div>';
+      el('lwAge').textContent = '';
+      return;
+    }
+    card.style.display = '';
+    var favs = stationFavs();
+    var ids = Object.keys(Hs).map(function (id) {
+      var st = Hs[id];
+      return { id: id, st: st, km: st.lat != null ? C.haversine(S.lat, S.lon, st.lat, st.lon) : 9999, fav: favs.indexOf(id) >= 0 };
+    }).sort(function (a, b) { return (b.fav - a.fav) || (a.km - b.km); });
+    var show = ids.filter(function (x, i) { return x.fav || i < 3; }).filter(function (x) { return x.fav || x.km <= 150; }).slice(0, 7);
+    var fetched = S.history.fetched ? S.history.fetched * 1000 : null;
+    el('lwAge').textContent = fetched ? 'as of ' + t(fetched) : '';
+    box.innerHTML = show.map(function (x) {
+      var last = x.st.data[x.st.data.length - 1];
+      return '<div class="lw" data-sid="' + x.id + '"><div class="lwh"><div><b>' + esc(x.st.name) + '</b> <span class="lwm">live wind report · ' + Math.round(x.km) + ' km</span></div>' +
+        '<button class="star' + (x.fav ? ' on' : '') + '" data-sfav="' + x.id + '" aria-label="Favourite station">' + (x.fav ? '★' : '☆') + '</button></div>' +
+        '<div class="lwm">' + (last ? 'Latest ' + t(last[0] * 1000) + ' — ' + wv(last[1]) + ' ' + wu() + (last[2] != null ? ', gusting ' + wv(last[2]) : '') + ' ' + C.degToCompass(last[3]) : '') + '</div>' +
+        '<div class="wwrap" data-chart="' + x.id + '"></div></div>';
+    }).join('') || '<div class="empty">No station within 150 km has readings. Star one further away to keep it here.</div>';
+    show.forEach(function (x) {
+      var wrap = box.querySelector('[data-chart="' + x.id + '"]');
+      var last = x.st.data[x.st.data.length - 1];
+      WindCharts.liveWind(wrap, x.st.data, chartOpts({ hours: Math.min(12, (S.history.hours || 12)), now: last ? last[0] * 1000 : Date.now() }));
+    });
+    box.onclick = function (e) {
+      var b = e.target.closest('button[data-sfav]'); if (!b) return;
+      var id = b.dataset.sfav, f = stationFavs(), i = f.indexOf(id);
+      if (i >= 0) f.splice(i, 1); else f.push(id);
+      C.Store._set('nf.stationFavs', f);
+      renderLiveWind();
+    };
   }
 
   function seaTempNote(sst) {
@@ -744,11 +882,18 @@
   function renderWindows() {
     var box = el('windows');
     if (!S.windows.length) { box.innerHTML = '<div class="empty">Nothing stands out in the next week. Best of a bad lot is still the dawn change.</div>'; return; }
+    var soonest = S.windows.slice(0, 5).reduce(function (m, w) { return w.end > Date.now() && (!m || w.start < m.start) ? w : m; }, null);
     box.innerHTML = S.windows.slice(0, 5).map(function (w) {
-      var conf = C.Ensemble.label(w.sd);
-      return '<div class="win"><div><div class="w1">' + relDay(w.start) + ' ' + t(w.start) + ' – ' + t(w.end) + '</div>' +
+      var conf = C.Ensemble.label(w.sd), isNext = w === soonest, until = '';
+      if (isNext) {
+        var mins = Math.round((w.start - Date.now()) / 60000);
+        var fmtMins = function (m) { m = Math.max(1, m); return m >= 60 ? Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '') : m + ' min'; };
+        until = mins <= 0 ? 'On now — ' + fmtMins(Math.round((w.end - Date.now()) / 60000)) + ' left' : 'Next up · starts in ' + fmtMins(mins);
+      }
+      return '<div class="win' + (isNext ? ' next' : '') + '"><div><div class="w1">' + relDay(w.start) + ' ' + t(w.start) + ' – ' + t(w.end) + '</div>' +
         '<div class="w2">' + windowSummary(w) +
-        (conf ? ' · <span style="color:' + toneColor(conf.tone) + '">' + conf.text.toLowerCase().replace(' confidence', ' conf.') + '</span>' : '') + '</div></div>' +
+        (conf ? ' · <span style="color:' + toneColor(conf.tone) + '">' + conf.text.toLowerCase().replace(' confidence', ' conf.') + '</span>' : '') + '</div>' +
+        (until ? '<div class="w3">' + until + '</div>' : '') + '</div>' +
         '<div class="pill" style="background:' + scoreColor(w.peak) + '">' + w.peak + '</div></div>';
     }).join('') + (S.spread ? '<div class="muted">Confidence comes from how tightly the ' + S.spread.members + ' members of BOM\u2019s ensemble agree on the wind.</div>' : '');
   }
@@ -791,7 +936,7 @@
   /* ================= FORECAST ======================================== */
 
   function renderForecast() {
-    renderTempChart(); renderScoreChart(); renderHourStrip(); renderDayList(); renderMarine();
+    renderWindWave(); renderWaveChart(); renderLiveWind(); renderTempChart(); renderScoreChart(); renderHourStrip(); renderDayList(); renderMarine();
   }
 
   function renderTempChart() {
@@ -839,6 +984,15 @@
       labels + '</svg>';
     var obs = S.obs && S.obs.temp != null ? ' · station reading ' + n1(S.obs.temp) + '° now' : '';
     el('tempFoot').textContent = 'Air temperature at ' + (S.gpsFix ? 'your location' : S.spot.name) + ', hourly for seven days. Dashed line is feels-like.' + obs;
+    if (typeof WindCharts !== 'undefined') WindCharts.bindScrub(el('tempChart'), el('tempChart').querySelector('svg'), { x0: padL, x1: w - 8, t0: t0, t1: t1, width: w, onTip: function (ms) {
+      var tv = C.sampleSeries(T, V, ms), fv = F ? C.sampleSeries(T, F, ms) : null, hum = C.sampleSeries(T, H.relative_humidity_2m, ms);
+      var code = C.sampleNearest(T, H.weather_code, ms), sn = A.sunTimes(new Date(ms), S.lat, S.lon, TZ);
+      var night = !!(sn.sunrise && sn.sunset && (ms < sn.sunrise.valueOf() || ms > sn.sunset.valueOf()));
+      if (tv == null) return null;
+      return '<div class="h">' + esc(dayName(ms)) + ' ' + esc(t(ms)) + '</div><div class="c">' + wxIcon(code, night) + ' ' + esc(wx(code)[0]) + '</div>' +
+        '<div class="g"><div><div class="k">Air</div><b>' + n0(tv) + '°</b></div>' + (fv != null ? '<div><div class="k">Feels like</div><b>' + n0(fv) + '°</b></div>' : '') +
+        (hum != null ? '<div><div class="k">Humidity</div><b>' + n0(hum) + '%</b></div>' : '') + '</div>';
+    } });
   }
 
   function renderScoreChart() {
@@ -889,6 +1043,18 @@
       '<text x="2" y="' + (Y(100) + 4) + '" font-size="10" fill="var(--ink3)">100</text>' +
       '<text x="2" y="' + (Y(50) + 4) + '" font-size="10" fill="var(--ink3)">50</text>' +
       '</svg>';
+    if (typeof WindCharts !== 'undefined') WindCharts.bindScrub(el('scoreChart'), el('scoreChart').querySelector('svg'), { x0: pad, x1: w - 8, t0: t0, t1: t1, width: w, onTip: function (ms) {
+      var best = null, bd = 1e18;
+      for (var q = 0; q < pts.length; q++) { var dd = Math.abs(pts[q].t - ms); if (dd < bd) { bd = dd; best = pts[q]; } }
+      if (!best) return null;
+      var v = C.Score.verdict(best.score), st = S.tide ? C.Tides.state(S.tide, best.t) : null;
+      var inWin = S.windows.filter(function (wn) { return best.t >= wn.start && best.t < wn.end; })[0];
+      return '<div class="h">' + esc(relDay(best.t)) + ' ' + esc(t(best.t)) + '</div><div class="c" style="color:' + toneColor(v.tone) + '">' + esc(v.label) + (inWin ? ' · in a best window' : '') + '</div>' +
+        '<div class="g"><div><div class="k">Bite score</div><b>' + best.score + '</b></div>' +
+        (best.wind != null ? '<div><div class="k">Wind</div><b>' + wv(best.wind) + ' ' + wu() + '</b><br>' + C.degToCompass(best.dir) + '</div>' : '') +
+        (st ? '<div><div class="k">Tide</div><b>' + (st.rising ? 'Run-in' : 'Run-out') + '</b><br>' + n1(st.height) + ' m</div>' : '') + '</div>' +
+        (best.sd != null ? '<div class="c"><span class="m">' + esc((C.Ensemble.label(best.sd) || {}).text || '') + '</span></div>' : '');
+    } });
   }
 
   function renderHourStrip() {
@@ -968,37 +1134,12 @@
     if (s('sea_surface_temperature') != null) cells.push(['Sea temp', n1(s('sea_surface_temperature')) + '°', seaTempNote(s('sea_surface_temperature'))]);
     else cells.push(['Sea temp', '<small>no reading</small>', 'not modelled at this point']);
     if (!cells.length) { card.style.display = 'none'; return; }
-    el('marineNote').textContent = 'Open-water point about ' + (S.marineKm ? (22 + S.marineKm) : 22) + ' km off ' + (S.spot ? S.spot.name : 'the spot') + '. Inside a bay or estuary the swell will be smaller than this.';
+    el('marineNote').textContent = 'Right now at the open-water point' + (S.spot && S.spot.sea ? ' about ' + Math.round(C.haversine(S.spot.lat, S.spot.lon, S.spot.sea.lat, S.spot.sea.lon) + (S.marineKm || 0)) + ' km off ' + S.spot.name : '') + '. Inside a bay or estuary the swell will be smaller than this.';
     el('marineGrid').className = 'grid two';
     el('marineGrid').innerHTML = cells.map(function (c) {
       return '<div class="cell"><div class="k">' + c[0] + '</div><div class="v">' + c[1] + '</div><div class="x">' + c[2] + '</div></div>';
     }).join('');
 
-    /* 7-day swell height line */
-    var w = 340, h = 120, pad = 22;
-    var T = Hh.time || [], V = Hh.wave_height || [];
-    var pts = [];
-    for (var i = 0; i < T.length; i++) if (V[i] != null) pts.push([T[i] * 1000, V[i]]);
-    if (pts.length < 3) { el('swellChart').innerHTML = ''; return; }
-    var t0 = pts[0][0], t1 = pts[pts.length - 1][0];
-    var mx = Math.max(1.5, pts.reduce(function (m, p) { return Math.max(m, p[1]); }, 0));
-    var X = function (x) { return pad + (x - t0) / (t1 - t0) * (w - pad - 8); };
-    var Y = function (v) { return h - 22 - v / mx * (h - 40); };
-    var path = pts.map(function (p, i) { return (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1); }).join(' ');
-    var lim = S.settings.swellLimit;
-    var ticks = '';
-    var d0 = A.startOfLocalDay(new Date(t0), TZ).valueOf();
-    for (var k = 0; k < 8; k++) {
-      var ds = d0 + k * DAY;
-      if (ds > t0 && ds < t1) ticks += '<line x1="' + X(ds).toFixed(1) + '" y1="10" x2="' + X(ds).toFixed(1) + '" y2="' + (h - 22) + '" stroke="var(--line)"/>' +
-        '<text x="' + (X(ds) + 3).toFixed(1) + '" y="' + (h - 7) + '" font-size="10" fill="var(--ink3)">' + dayName(ds) + '</text>';
-    }
-    el('swellChart').innerHTML = '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:120px">' + ticks +
-      '<line x1="' + pad + '" y1="' + Y(lim).toFixed(1) + '" x2="' + (w - 8) + '" y2="' + Y(lim).toFixed(1) + '" stroke="var(--bad)" stroke-dasharray="4 3" stroke-width="1.2"/>' +
-      '<text x="' + (w - 10) + '" y="' + (Y(lim) - 4).toFixed(1) + '" font-size="10" fill="var(--bad)" text-anchor="end">your limit ' + n1(lim) + ' m</text>' +
-      '<path d="' + path + ' L' + X(t1).toFixed(1) + ' ' + (h - 22) + ' L' + X(t0).toFixed(1) + ' ' + (h - 22) + 'Z" fill="var(--t-accent-13)"/>' +
-      '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2"/>' +
-      '<text x="2" y="' + (Y(mx) + 9) + '" font-size="10" fill="var(--ink3)">' + n1(mx) + 'm</text></svg>';
   }
 
   /* ================= TIDES =========================================== */
@@ -1024,6 +1165,14 @@
     var sol = A.solunar(dayStart, S.lat, S.lon, TZ);
 
     el('tideChart').innerHTML = tideDayChart(dayStart, sun, sol);
+    if (S.tide && typeof WindCharts !== 'undefined') WindCharts.bindScrub(el('tideChart'), el('tideChart').querySelector('svg'), { x0: 28, x1: 330, t0: dayStart.valueOf(), t1: dayStart.valueOf() + DAY, width: 340, onTip: function (ms) {
+      var st = C.Tides.state(S.tide, ms); if (!st || st.height == null) return null;
+      var moon = sol.periods.filter(function (p) { return ms >= p.start.valueOf() && ms <= p.end.valueOf(); })[0];
+      var night = !!(sun.sunrise && sun.sunset && (ms < sun.sunrise.valueOf() || ms > sun.sunset.valueOf()));
+      return '<div class="h">' + esc(t(ms)) + '</div>' +
+        '<div class="g"><div><div class="k">Height</div><b>' + n1(st.height) + ' m</b></div><div><div class="k">' + (st.rising ? 'Running in' : 'Running out') + '</div><b>' + n1(Math.abs(st.rate || 0)) + ' m/h</b></div></div>' +
+        '<div class="c">' + (st.next.type === 'high' ? 'High' : 'Low') + ' ' + n1(st.next.h) + ' m at ' + esc(t(st.next.t)) + (moon ? ' · ' + (moon.kind === 'major' ? 'moon major' : 'moon minor') : '') + (night ? ' · dark' : '') + '</div>';
+    } });
 
     if (S.tide) {
       var ex = C.Tides.extremesForDay(S.tide, dayStart.valueOf());
@@ -1754,7 +1903,7 @@
       });
       closeSheet(); renderLog();
       if (S.settings.learn) { computeScores(); renderNow(); }
-      alertBanner(blank ? 'Blank session logged.' : 'Catch logged.', 'info');
+      toast(blank ? 'Blank session logged' : 'Catch logged');
     });
   }
 
@@ -1763,7 +1912,7 @@
   function shareText(text, title) {
     if (navigator.share) return navigator.share({ title: title, text: text }).catch(function () {});
     return (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
-      .then(function () { alertBanner('Copied — paste it into a message.', 'info'); },
+      .then(function () { toast('Copied — paste it into a message'); },
             function () { openSheet('<h3>' + esc(title) + '</h3><pre style="white-space:pre-wrap;font:inherit;font-size:14px">' + esc(text) + '</pre>'); });
   }
 
@@ -1865,6 +2014,8 @@
       S.bom && S.bom.coastal && Object.keys(S.bom.coastal).length ? 'Coastal waters forecast issued ' + esc(S.bom.updated || '') : 'Not fetched yet — run “Update BOM data” in GitHub Actions');
     if (S.obs) row('Station', S.obs.ageMin != null && S.obs.ageMin < 90 ? 'ok' : 'warn', esc(S.obs.name) + ' · ' + S.obs.km + ' km · ' + (S.obs.ageMin != null ? 'read ' + ago(S.obs.ageMin) : 'age unknown'));
     else row('Station', 'warn', S.live ? 'No BOM station within 45 km yet — the feed maps more stations every 10 min' : 'Live feed not reachable');
+    var nH = S.history && S.history.stations ? Object.keys(S.history.stations).length : 0;
+    row('Live wind', nH ? 'ok' : 'warn', nH ? nH + ' coastal stations with ' + (S.history.hours || 12) + ' h of readings · ' + ago(Math.round((Date.now() - S.history.fetched * 1000) / 60000)) : 'No station history yet — the live feed publishes it every run');
     var nR = S.liveRadar && S.liveRadar.radars ? Object.keys(S.liveRadar.radars).length : 0;
     row('BOM radar', nR ? 'ok' : 'warn', nR ? nR + ' radars · frames load live from BOM; the feed (last ran ' + ago(Math.round((Date.now() - S.liveRadar.fetched * 1000) / 60000)) + ') supplies the map layers' : 'No frames yet — run “Live BOM feed” in GitHub Actions');
     row('Confidence', S.spread ? 'ok' : 'warn', S.spread ? S.spread.members + '-member ensemble' : 'Ensemble not available — windows show no confidence tag');
@@ -2009,7 +2160,7 @@
         var sp = makeCustomSpot(r.name, r.admin1 || '', r.latitude, r.longitude);
         C.Store.saveSettings({ useGps: false }); S.settings = C.Store.settings();
         setSpot(sp.id); closeSheet();
-        alertBanner('Added ' + esc(sp.name) + ' to your places. ' + esc(sp.note), 'info');
+        toast('Added ' + sp.name + ' to your places');
         return;
       }
       var b = e.target.closest('button[data-id]'); if (!b) return;
