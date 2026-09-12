@@ -31,7 +31,7 @@ RADARS = ["IDR713", "IDR033", "IDR043", "IDR403", "IDR283", "IDR553", "IDR693", 
 KEEP_FRAMES = 8
 MAX_STATION_LOOKUPS = 80
 HISTORY_HOURS = 14
-MAX_HISTORY_STATIONS = 48
+MAX_HISTORY_STATIONS = 80
 COAST_KM = 35
 # coarse NSW coastline, north to south — a station within COAST_KM of any of
 # these gets its recent history published for the live wind charts
@@ -183,16 +183,24 @@ def fetch_obs(stations):
     return out
 
 
-def near_coast(lat, lon):
+def coast_km(lat, lon):
+    """Distance to the nearest point of the coarse coastline, or None."""
     if lat is None or lon is None:
-        return False
+        return None
     import math
+    best = None
     for clat, clon in COAST:
         dy = (lat - clat) * 111.2
         dx = (lon - clon) * 111.2 * math.cos(math.radians(clat))
-        if math.hypot(dx, dy) <= COAST_KM:
-            return True
-    return False
+        d = math.hypot(dx, dy)
+        if best is None or d < best:
+            best = d
+    return best
+
+
+def near_coast(lat, lon):
+    d = coast_km(lat, lon)
+    return d is not None and d <= COAST_KM
 
 
 def fetch_history(obs, old):
@@ -201,9 +209,10 @@ def fetch_history(obs, old):
     previous history so a single 403 does not blank a chart."""
     now = time.time()
     cutoff = now - HISTORY_HOURS * 3600
-    coastal = [o for o in obs if near_coast(o.get("lat"), o.get("lon")) and (o.get("windKt") is not None)]
-    # nearest-to-coast first is not needed; cap the count deterministically by name
-    coastal = sorted(coastal, key=lambda o: o["name"])[:MAX_HISTORY_STATIONS]
+    coastal = [o for o in obs if near_coast(o.get("lat"), o.get("lon")) and (o.get("windKt") is not None)
+               and not re.search(r"PORTABLE|\(RFS\)|RF\d+|Water NSW|Defence", o["name"], re.I)]
+    # the ones right on the water first, so the cap never drops a headland for a suburb
+    coastal = sorted(coastal, key=lambda o: coast_km(o["lat"], o["lon"]))[:MAX_HISTORY_STATIONS]
     out, ok, failed = {}, 0, 0
     for o in coastal:
         sid = o["id"]
