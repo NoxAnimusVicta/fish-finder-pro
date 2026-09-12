@@ -4,6 +4,7 @@ branch. Everything is best effort — a failed fetch keeps whatever was there.
 
 Layout of the live branch (LIVE_DIR):
   obs.json            latest reading from every NSW station with a position
+  history.json        last HISTORY_HOURS of readings for coastal stations
   stations.json       station id -> lat/lon cache, filled in gradually
   radar.json          frame lists per radar
   radar/IDR713/…png   the last few frames plus the static layers
@@ -29,6 +30,17 @@ UAS = [
 RADARS = ["IDR713", "IDR033", "IDR043", "IDR403", "IDR283", "IDR553", "IDR693", "IDR963", "IDR663", "IDR683"]
 KEEP_FRAMES = 8
 MAX_STATION_LOOKUPS = 80
+HISTORY_HOURS = 14
+MAX_HISTORY_STATIONS = 48
+COAST_KM = 35
+# coarse NSW coastline, north to south — a station within COAST_KM of any of
+# these gets its recent history published for the live wind charts
+COAST = [(-28.17, 153.55), (-28.40, 153.58), (-28.64, 153.63), (-28.87, 153.59), (-29.10, 153.45), (-29.43, 153.36),
+         (-29.78, 153.30), (-30.30, 153.14), (-30.65, 153.02), (-30.88, 153.05), (-31.20, 152.98), (-31.43, 152.92),
+         (-31.84, 152.75), (-32.18, 152.52), (-32.44, 152.53), (-32.72, 152.19), (-32.93, 151.79), (-33.09, 151.65),
+         (-33.28, 151.58), (-33.53, 151.40), (-33.86, 151.22), (-34.00, 151.20), (-34.20, 151.05), (-34.42, 150.90),
+         (-34.67, 150.86), (-34.85, 150.75), (-35.05, 150.75), (-35.36, 150.48), (-35.71, 150.19), (-35.92, 150.15),
+         (-36.22, 150.13), (-36.42, 150.07), (-36.72, 149.99), (-36.89, 149.91), (-37.07, 149.90), (-37.40, 149.95)]
 
 S = requests.Session()
 
@@ -171,6 +183,59 @@ def fetch_obs(stations):
     return out
 
 
+def near_coast(lat, lon):
+    if lat is None or lon is None:
+        return False
+    import math
+    for clat, clon in COAST:
+        dy = (lat - clat) * 111.2
+        dx = (lon - clon) * 111.2 * math.cos(math.radians(clat))
+        if math.hypot(dx, dy) <= COAST_KM:
+            return True
+    return False
+
+
+def fetch_history(obs, old):
+    """Recent readings for coastal stations, from BOM's per-station JSON
+    (72 h of 10- or 30-minute observations). Stations that fail keep their
+    previous history so a single 403 does not blank a chart."""
+    now = time.time()
+    cutoff = now - HISTORY_HOURS * 3600
+    coastal = [o for o in obs if near_coast(o.get("lat"), o.get("lon")) and (o.get("windKt") is not None)]
+    # nearest-to-coast first is not needed; cap the count deterministically by name
+    coastal = sorted(coastal, key=lambda o: o["name"])[:MAX_HISTORY_STATIONS]
+    out, ok, failed = {}, 0, 0
+    for o in coastal:
+        sid = o["id"]
+        try:
+            j = json.loads(get(f"https://www.bom.gov.au/fwo/IDN60801/IDN60801.{sid}.json"))
+            rows = []
+            for d in j["observations"]["data"]:
+                try:
+                    ts = int(dt.datetime.strptime(d["local_date_time_full"], "%Y%m%d%H%M%S").replace(tzinfo=TZ).timestamp())
+                except Exception:
+                    continue
+                if ts < cutoff:
+                    continue
+                dtxt = (d.get("wind_dir") or "").upper()
+                spd = 0.0 if dtxt == "CALM" else (d.get("wind_spd_kt") if isinstance(d.get("wind_spd_kt"), (int, float)) else None)
+                gust = d.get("gust_kt") if isinstance(d.get("gust_kt"), (int, float)) else None
+                rows.append([ts, spd, gust, DIRS.get(dtxt), d.get("air_temp"), d.get("press_msl")])
+            rows.sort(key=lambda r: r[0])
+            if rows:
+                out[sid] = {"name": o["name"], "lat": o["lat"], "lon": o["lon"], "data": rows}
+                ok += 1
+            time.sleep(0.35)
+        except Exception as e:
+            failed += 1
+            print(f"  history {sid}: {e}", file=sys.stderr)
+            prev = (old.get("stations") or {}).get(sid)
+            if prev:
+                out[sid] = prev
+    print(f"history: {ok} stations fetched, {failed} failed, {len(out)} published")
+    return {"fetched": int(now), "hours": HISTORY_HOURS, "stations": out}
+
+
 # ------------------------------------------------------------------- radar
 # BOM retired the HTML loop pages in 2026, but the anonymous FTP server still
 # lists and serves every radar frame, and the HTTP mirror of the same files
@@ -267,6 +332,11 @@ def main():
         jsave(os.path.join(LIVE, "stations.json"), stations)
         jsave(os.path.join(LIVE, "obs.json"), {"fetched": now, "stations": obs})
         print(f"observations: {len(obs)} stations ({sum(1 for o in obs if o['lat'] is not None)} positioned)")
+        try:
+            old = jload(os.path.join(LIVE, "history.json"), {})
+            jsave(os.path.join(LIVE, "history.json"), fetch_history(obs, old))
+        except Exception as e:
+            print(f"history failed: {e}", file=sys.stderr)
     except Exception as e:
         print(f"observations failed: {e}", file=sys.stderr)
 
