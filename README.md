@@ -36,7 +36,7 @@ within a minute. On the phone, close and reopen the app to pick it up.
 | Tab | What it does |
 | --- | --- |
 | **Now** | Bite score 0–100 with the reasoning shown, current wind/swell/water temp/barometer, next tide, sun and moon, and the best windows over the next week |
-| **Forecast** | Bite score charted across seven days, 48-hour strip, daily outlook, swell and sea state |
+| **Forecast** | Seabreeze-style wind & wave chart (2/4/7 days, colour-banded arrows, wave fill, chance of rain from the BOM ensemble, drag for detail), swell & period chart, live wind reports from nearby BOM stations (12 h of readings, average and gust arrows, starrable), bite score charted across seven days, 48-hour strip, daily outlook, swell and sea state |
 | **Tides** | Tide curve per day with highs and lows, night shading, moon feeding periods |
 | **Maps** | Live BOM radar loop for the nearest site with a you-are-here dot, a map-based radar, Windy wind and swell layers, one-tap links to BOM warnings |
 | **Fish** | 40 NSW species with season bars, run and migration notes, current legal sizes and bag limits, baits and lures |
@@ -122,6 +122,7 @@ js/astro.js                sun, moon, solunar maths
 js/data.js                 spots, ports, radars, species, NSW rules
 js/core.js                 storage, network, tides, bite score
 js/map.js                  the slippy map (no libraries)
+js/wind.js                 wind, wave and live-station charts with the scrub tooltip
 js/app.js                  screens, charts, glue
 sw.js                      offline cache — bump CACHE after edits
 manifest.webmanifest       home-screen install metadata

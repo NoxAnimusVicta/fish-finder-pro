@@ -83,6 +83,7 @@
     <div class="card" id="stationCard" style="display:none">
       <h2>Actual reading — nearest BOM station</h2>
       <div id="stationBody"></div>
+      <div class="wwrap" id="stationChart" style="margin-top:10px"></div>
     </div>
 
     <div class="card" id="tideNowCard">
@@ -116,13 +117,35 @@
   <!-- ============ FORECAST ============ -->
   <section class="view" id="v-forecast">
     <div class="card">
-      <h2>Temperature — next 7 days</h2>
-      <div id="tempChart"></div>
-      <div class="muted" id="tempFoot" style="margin-top:8px"></div>
+      <div class="row" style="margin-bottom:6px"><h2 style="margin:0">Wind &amp; waves</h2>
+        <div class="seg mini" id="wwRange"><button data-h="48">2 days</button><button data-h="96" class="on">4 days</button><button data-h="168">7 days</button></div>
+      </div>
+      <div class="wwrap" id="wwChart"></div>
+      <div class="legend windkey">
+        <span><i style="background:#35d43a"></i>&lt;10 kt</span><span><i style="background:#ffe11a"></i>10–19</span><span><i style="background:#ff8a1f"></i>20–29</span><span><i style="background:#ff2f2f"></i>30+</span><span><i style="background:var(--t-accent-30)"></i>Wave height</span>
+      </div>
+      <div class="muted" id="wwNote" style="margin-top:4px">Arrows point where the wind is going. Touch and drag across the chart for the detail.</div>
+    </div>
+    <div class="card" id="lwCard">
+      <div class="row" style="margin-bottom:4px"><h2 style="margin:0">Live wind reports</h2><span class="muted" id="lwAge"></span></div>
+      <div id="liveWind"></div>
+    </div>
+    <div class="card" id="swCard">
+      <h2>Swell &amp; period</h2>
+      <div class="wwrap" id="swChart"></div>
+      <div class="legend windkey">
+        <span><i style="background:#7fb8ff"></i>&lt;8 s</span><span><i style="background:#2f7ff5"></i>8–11 s</span><span><i style="background:#0b4bd6"></i>12 s+</span><span><i style="background:var(--t-accent-30)"></i>Total sea</span><span><i style="border-top:2px dashed var(--accent);height:0;width:14px;border-radius:0;background:none"></i>Swell</span>
+      </div>
+      <div class="muted" id="swNote" style="margin-top:4px"></div>
+    </div>
+    <div class="card" id="marineCard">
+      <h2>Sea state now</h2>
+      <div class="grid" id="marineGrid"></div>
+      <div class="muted" id="marineNote" style="margin-top:8px"></div>
     </div>
     <div class="card">
       <h2>Bite score — next 7 days</h2>
-      <div id="scoreChart"></div>
+      <div class="wwrap" id="scoreChart"></div>
       <div class="legend">
         <span><i style="background:var(--accent)"></i>Bite score</span>
         <span><i style="background:var(--ink3)"></i>Wind (kt)</span>
@@ -130,18 +153,17 @@
       </div>
     </div>
     <div class="card">
+      <h2>7 days</h2>
+      <div id="dayList"></div>
+    </div>
+    <div class="card">
       <h2>Next 48 hours</h2>
       <div class="strip" id="hourStrip"></div>
     </div>
     <div class="card">
-      <h2>7 days</h2>
-      <div id="dayList"></div>
-    </div>
-    <div class="card" id="marineCard">
-      <h2>Swell &amp; sea</h2>
-      <div class="grid" id="marineGrid"></div>
-      <div id="swellChart" style="margin-top:12px"></div>
-      <div class="muted" id="marineNote" style="margin-top:8px"></div>
+      <h2>Temperature — next 7 days</h2>
+      <div class="wwrap" id="tempChart"></div>
+      <div class="muted" id="tempFoot" style="margin-top:8px"></div>
     </div>
   </section>
 
@@ -152,7 +174,7 @@
     </div>
     <div class="card">
       <h2 id="tideTitle">Tide</h2>
-      <div id="tideChart"></div>
+      <div class="wwrap" id="tideChart"></div>
       <div class="legend">
         <span><i style="background:var(--accent)"></i>Tide height</span>
         <span><i style="background:var(--t-accent2-45)"></i>Moon feeding period</span>
@@ -397,6 +419,7 @@
 </main>
 
 <button class="fab" id="fab">+ Log a catch</button>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <nav class="tabbar" id="tabs">
   <button data-v="now" class="on"><svg viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>Now</span></button>
@@ -414,6 +437,7 @@
 <script src="./js/data.js"></script>
 <script src="./js/core.js"></script>
 <script src="./js/map.js"></script>
+<script src="./js/wind.js"></script>
 <script src="./js/app.js"></script>
 </body>
 </html>
