@@ -12,7 +12,7 @@
     live: null, liveRadar: null, obs: null, obsDelta: null, ens: null, spread: null, learned: null,
     bomRadarId: null, bomFrameIx: 0, bomPlaying: false, bomTimer: null, radarSource: 'bom',
     series: [], windows: [], detail: null,
-    tideDay: 0, mapMode: 'radar', base: C.Store._get('nf.base', 'map'), ov: {}, scrollMemo: {},
+    tideDay: 0, mapMode: 'radar', base: 'map', scrollMemo: {},
     radar: null, frames: [], frameIx: 0, playing: false, timer: null,
     loading: false, lastError: null, stale: false
   };
@@ -88,7 +88,7 @@
     document.documentElement.classList.toggle('big', S.settings.textSize === 'large');
   }
 
-  var APP_VERSION = 'v21';
+  var APP_VERSION = 'v22';
 
   /* Last twenty errors, kept on the phone for the Diagnostics page. */
   function diagLog(kind, msg, where) {
@@ -158,13 +158,6 @@
       else { computeScores(); renderNow(); }
     });
     renderRuleLinks(); renderAbout(); installHint();
-    /* the land outline the swell map clips to; static, built by the coast workflow */
-    if (typeof WxOverlay !== 'undefined') {
-      C.Api.local('coast.json').then(function (j) {
-        S.coast = WxOverlay.decodeCoast(j);
-        if (S.coast && S.ov.swell) S.ov.swell.ov.setCoast(S.coast);
-      }).catch(function () {});
-    }
     setSpot(S.settings.spot, true);
     var lastTab = C.Store._get('nf.tab', 'now');
     if (lastTab && lastTab !== 'now' && lastTab !== 'me') setTimeout(function () { showView(lastTab); }, 0);
@@ -253,9 +246,8 @@
   function syncMaps() {
     if (!el('v-maps').classList.contains('on')) return;
     initRadar();
-    if (S.mapMode === 'wind') initOverlayMap('wind');
-    if (S.mapMode === 'waves') initOverlayMap('swell');
-    updateBaseSeg();
+    if (S.mapMode === 'wind') setWindy('windyFrame', 'wind');
+    if (S.mapMode === 'waves') setWindy('waveFrame', waveOverlay());
   }
   function posKey() { return S.lat.toFixed(2) + ',' + S.lon.toFixed(2); }
 
@@ -1420,28 +1412,20 @@
       el('radarPane').style.display = S.mapMode === 'radar' ? '' : 'none';
       el('windPane').style.display = S.mapMode === 'wind' ? '' : 'none';
       el('wavePane').style.display = S.mapMode === 'waves' ? '' : 'none';
-      if (S.mapMode === 'wind') initOverlayMap('wind');
-      if (S.mapMode === 'waves') initOverlayMap('swell');
+      if (S.mapMode === 'wind') setWindy('windyFrame', 'wind');
+      if (S.mapMode === 'waves') setWindy('waveFrame', waveOverlay());
       if (S.mapMode === 'radar' && S.map) S.map.render();
-      updateBaseSeg();
     });
     el('baseSeg').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-b]'); if (!b) return;
       Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); });
       S.base = b.dataset.b;
-      C.Store._set('nf.base', S.base);
       buildMapLayers();
-      ['wind', 'swell'].forEach(function (k) { if (S.ov[k]) applyBase(S.ov[k].map, k + 'Attr', k); });
     });
     el('waveSeg').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-wo]'); if (!b) return;
       Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); });
-      S.waveOverlay = b.dataset.wo;
-      if (S.ov.swell) { S.ov.swell.ov.setMode(waveOverlay()); renderOverlayLegend('swell'); }
-    });
-    ['wind', 'swell'].forEach(function (k) {
-      el(k + 'Play').addEventListener('click', function () { var o = S.ov[k] && S.ov[k].ov; if (!o) return; o.playing ? o.stop() : o.play(); setPlayIcon(k + 'Play', o.playing); });
-      el(k + 'Scrub').addEventListener('input', function () { var o = S.ov[k] && S.ov[k].ov; if (!o) return; o.stop(); setPlayIcon(k + 'Play', false); o.setTime(+this.value); });
+      S.waveOverlay = b.dataset.wo; setWindy('waveFrame', waveOverlay());
     });
     el('radarSrc').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-rs]'); if (!b) return;
@@ -1459,87 +1443,21 @@
       .map(function (c) { return '<i style="background:' + c + '"></i>'; }).join('');
   }
 
+  /* Windy only draws a wave overlay when the wave model is selected too —
+     without product=ecmwfWaves the embed quietly falls back to wind. */
+  var WINDY_PRODUCT = { wind: 'ecmwf', gust: 'ecmwf', waves: 'ecmwfWaves', swell1: 'ecmwfWaves', swell2: 'ecmwfWaves', wwaves: 'ecmwfWaves' };
+  function setWindy(id, overlay) {
+    var f = el(id);
+    var lat = S.lat.toFixed(3), lon = S.lon.toFixed(3);
+    /* the current embed.html endpoint — the older embed2.html quietly ignores
+       the wave product and shows wind whatever you ask for */
+    var u = 'https://embed.windy.com/embed.html?type=map&location=coordinates&metricRain=mm&metricTemp=%C2%B0C' +
+      '&metricWind=' + (S.settings.unitsWind === 'kmh' ? 'km%2Fh' : 'kt') + '&zoom=8&overlay=' + overlay +
+      '&product=' + (WINDY_PRODUCT[overlay] || 'ecmwf') + '&level=surface&lat=' + lat + '&lon=' + lon +
+      '&detailLat=' + lat + '&detailLon=' + lon + '&marker=true&message=true';
+    if (f.getAttribute('data-src') !== u) { f.setAttribute('data-src', u); f.src = u; }
+  }
   function waveOverlay() { return S.waveOverlay || 'waves'; }
-
-  /* ---- our own wind and swell maps ---------------------------------- */
-  /* base tiles for any of the three maps, with the credit line under it */
-  function applyBase(map, attrId, kind) {
-    map.clearLayers();
-    var bm = MiniMap.Basemaps[S.base] || MiniMap.Basemaps.map;
-    map.addLayer({ url: bm.url, maxNativeZoom: bm.maxNativeZoom, opacity: 1 });
-    if (attrId) el(attrId).textContent = bm.attribution + (kind === 'wind' ? ' · Wind: Open-Meteo, drawn by the app' : kind === 'swell' ? ' · Waves: Open-Meteo Marine, drawn by the app' : '');
-    map.render();
-  }
-  function updateBaseSeg() {
-    var show = S.mapMode !== 'radar' || S.radarSource === 'rv';
-    el('baseSeg').style.display = show ? '' : 'none';
-    setSeg('baseSeg', 'b', S.base);
-  }
-  function setPlayIcon(id, playing) {
-    el(id).innerHTML = playing ? '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor" stroke="none"/></svg>'
-      : '<svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor" stroke="none"/></svg>';
-    el(id).setAttribute('aria-label', playing ? 'Pause' : 'Play');
-  }
-
-  function initOverlayMap(kind) {
-    if (typeof WxOverlay === 'undefined' || typeof MiniMap === 'undefined') return;
-    var ids = kind === 'wind' ? { map: 'windMap', attr: 'windAttr', time: 'windTime', scrub: 'windScrub', legend: 'windLegend', pane: 'windPane', play: 'windPlay' }
-                              : { map: 'swellMap', attr: 'swellAttr', time: 'swellTime', scrub: 'swellScrub', legend: 'swellLegend', pane: 'wavePane', play: 'swellPlay' };
-    var entry = S.ov[kind];
-    if (!entry) {
-      var map = new MiniMap(el(ids.map), { lat: S.lat, lon: S.lon, zoom: 8, minZoom: 5, maxZoom: 11 });
-      applyBase(map, ids.attr, kind);
-      var pop = document.createElement('div'); pop.className = 'ovpop'; pop.style.display = 'none'; el(ids.map).appendChild(pop);
-      var ov = new WxOverlay.Overlay(map, {
-        kind: kind, mode: kind === 'swell' ? waveOverlay() : 'wind', unit: S.settings.unitsWind, coast: kind === 'swell' ? S.coast : null,
-        fmtTime: function (ms) { return t(ms); }, fmtDay: function (ms) { return relDay(ms); },
-        onstatus: function (st, err) {
-          var tl = el(ids.time);
-          if (st === 'loading') tl.textContent = 'loading…';
-          else if (st === 'error') { tl.textContent = 'offline'; toast(kind === 'wind' ? 'No wind grid — check signal' : 'No swell grid — check signal'); }
-          else if (st === 'stale') tl.textContent = tl.textContent.replace(' ·', '') + ' · older';
-        },
-        ontime: function (i, ms, T) {
-          el(ids.scrub).max = String(T - 1); el(ids.scrub).value = String(i);
-          el(ids.time).textContent = relDay(ms) + ' ' + t(ms);
-          pop.style.display = 'none';
-        }
-      });
-      ov.setVisible(function () { return el('v-maps').classList.contains('on') && el(ids.pane).style.display !== 'none'; });
-      map.ontap = function (p) {
-        var v = ov.valueAt(p.lat, p.lon);
-        if (!v) { pop.style.display = 'none'; return; }
-        var html;
-        if (kind === 'wind') {
-          html = '<b>' + wv(v.mag) + ' ' + wu() + '</b> ' + C.degToCompass(v.dir) + (v.extra != null && !isNaN(v.extra) ? ' · gusts ' + wv(v.extra) : '') +
-            '<div class="m">' + relDay(v.time) + ' ' + t(v.time) + ' · ' + arrow(v.dir, 13) + '</div>';
-        } else {
-          html = '<b>' + n1(v.mag) + ' m</b>' + (v.extra != null && !isNaN(v.extra) ? ' · ' + n0(v.extra) + ' s' : '') + ' · from ' + C.degToCompass(v.dir) +
-            '<div class="m">' + relDay(v.time) + ' ' + t(v.time) + ' · ' + arrow(v.dir, 13) + '</div>';
-        }
-        pop.innerHTML = html; pop.style.display = '';
-        var s = map.size(), pw = pop.offsetWidth || 150, left = Math.max(6, Math.min(s.w - pw - 6, p.x - pw / 2)), top = p.y - (pop.offsetHeight || 50) - 14;
-        if (top < 6) top = p.y + 16;
-        pop.style.left = left + 'px'; pop.style.top = top + 'px';
-        clearTimeout(pop._t); pop._t = setTimeout(function () { pop.style.display = 'none'; }, 5000);
-      };
-      var prev = map.onmove; map.onmove = function (c, z) { if (prev) prev(c, z); pop.style.display = 'none'; };
-      entry = S.ov[kind] = { map: map, ov: ov, pop: pop, forKey: null };
-      renderOverlayLegend(kind);
-    }
-    entry.ov.setUnit(S.settings.unitsWind); renderOverlayLegend(kind);
-    entry.map.setMarkers([{ lat: S.lat, lon: S.lon, cls: S.gpsFix ? 'me' : '' }]);
-    if (entry.forKey !== posKey()) {
-      entry.map.setView(S.lat, S.lon, entry.map.z);
-      entry.forKey = posKey();
-    } else entry.map.render();
-    entry.ov.animate();
-  }
-
-  function renderOverlayLegend(kind) {
-    var id = kind === 'wind' ? 'windLegend' : 'swellLegend';
-    el(id).innerHTML = WxOverlay.legend(kind, S.settings.unitsWind);
-  }
 
   function showRadarSource() {
     var haveBom = !!(S.liveRadar && S.liveRadar.radars && Object.keys(S.liveRadar.radars).length);
@@ -1553,7 +1471,6 @@
     el('radarSrc').children[0].style.opacity = haveBom ? '' : '.4';
     if (eff === 'bom') bomBuild();
     else { if (S.map) S.map.render(); }
-    updateBaseSeg();
   }
 
   /* BOM still serves the frame PNGs to a plain <img> from any site, so the
@@ -1694,7 +1611,7 @@
   function buildMapLayers() {
     if (!S.map) return;
     S.map.clearLayers();
-    var bm = MiniMap.Basemaps[S.base] || MiniMap.Basemaps.map;
+    var bm = MiniMap.Basemaps[S.base];
     S.map.addLayer({ url: bm.url, maxNativeZoom: bm.maxNativeZoom, opacity: 1 });
     el('mapAttr').textContent = bm.attribution + (S.frames.length ? ' · Radar © RainViewer' : '');
     S.radarLayers = [];
@@ -2268,8 +2185,8 @@
   function renderAbout() {
     var R = D.RULES;
     el('about').innerHTML =
-      '<p><b>Where the numbers come from.</b> Forecast from the Bureau of Meteorology ACCESS-G model (or a multi-model blend if you switch it), with ECMWF and GFS alongside for the model-spread band, all served through Open-Meteo. Swell, sea state and water temperature from Open-Meteo Marine. Rain radar straight from BOM, with RainViewer as the map view. The wind and swell maps are drawn by the app itself from a grid of Open-Meteo points; the swell map stops at the coastline from the ABS 2021 boundaries. Base maps from Geoscience Australia and NSW Spatial Services. Tides are official BOM predictions when the repository has them, otherwise a global tide model estimate. Live station readings from BOM. Sun, moon and feeding times are calculated on your phone.</p>' +
-      '<p><b>Attribution.</b> <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a> (CC BY 4.0). <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">Weather data by RainViewer</a>. Base maps &copy; <a href="https://www.ga.gov.au/" target="_blank" rel="noopener">Geoscience Australia</a> (CC BY 4.0) and &copy; State of New South Wales (<a href="https://www.spatial.nsw.gov.au/" target="_blank" rel="noopener">Spatial Services</a>, CC BY); satellite outside NSW &copy; Esri. Coastline from the <a href="https://www.abs.gov.au/" target="_blank" rel="noopener">Australian Bureau of Statistics</a> ASGS 2021 (CC BY 4.0). Fishing rules from NSW DPIRD.</p>' +
+      '<p><b>Where the numbers come from.</b> Forecast from the Bureau of Meteorology ACCESS-G model (or a multi-model blend if you switch it), with ECMWF and GFS alongside for the model-spread band, all served through Open-Meteo. Swell, sea state and water temperature from Open-Meteo Marine. Rain radar straight from BOM, with RainViewer as the map view. Wind and swell maps by Windy. Tides are official BOM predictions when the repository has them, otherwise a global tide model estimate. Live station readings from BOM. Sun, moon and feeding times are calculated on your phone.</p>' +
+      '<p><b>Attribution.</b> <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a> (CC BY 4.0). <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">Weather data by RainViewer</a>. Map layers by <a href="https://www.windy.com/" target="_blank" rel="noopener">Windy.com</a>. Base maps &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>; imagery and nautical tiles &copy; Esri. Fishing rules from NSW DPIRD.</p>' +
       '<p><b>Bureau of Meteorology.</b> This product is based on Bureau of Meteorology information that has subsequently been modified. The Bureau does not necessarily support or endorse, or have any connection with, the product. Always check the Bureau&rsquo;s own warnings before heading out.</p>' +
       '<p><b>Fishing rules</b> checked against NSW DPIRD, ' + esc(R.asAt) + '. They change — the official tables win. Report illegal fishing on 1800 043 536.</p>' +
       '<p><b>Not for navigation.</b> Tide heights and swell figures are guidance, not depth or safety data. The bite score is an estimate, not a promise. Rock fishing kills people in NSW every year: wear a lifejacket, watch the sea for ten minutes before you climb down, and never fish alone.</p>' +

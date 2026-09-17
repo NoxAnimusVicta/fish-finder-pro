@@ -145,33 +145,6 @@
 
   MiniMap.prototype.setMarkers = function (list) { this.markers = list || []; this.render(); };
 
-  /* pixel position inside the container for a lat/lon, and back */
-  MiniMap.prototype.project = function (lat, lon) {
-    var s = this.size();
-    return { x: lon2x(lon, this.z) - lon2x(this.center.lon, this.z) + s.w / 2,
-             y: lat2y(lat, this.z) - lat2y(this.center.lat, this.z) + s.h / 2 };
-  };
-  MiniMap.prototype.unproject = function (x, y) {
-    var s = this.size();
-    return { lat: y2lat(lat2y(this.center.lat, this.z) - s.h / 2 + y, this.z),
-             lon: x2lon(lon2x(this.center.lon, this.z) - s.w / 2 + x, this.z) };
-  };
-  MiniMap.prototype.bounds = function () {
-    var s = this.size(), a = this.unproject(0, 0), b = this.unproject(s.w, s.h);
-    return { north: a.lat, south: b.lat, west: a.lon, east: b.lon };
-  };
-  /* metres per pixel at the centre — the overlay sizes its grid from this */
-  MiniMap.prototype.metresPerPixel = function () {
-    return 40075016.686 * Math.cos(this.center.lat * Math.PI / 180) / (TS * Math.pow(2, this.z));
-  };
-  /* a canvas that sits over the tiles and under the markers; the caller
-     draws on it after every render (see onmove) */
-  MiniMap.prototype.addCanvas = function (cls) {
-    var c = el('canvas', 'mm-canvas ' + (cls || ''));
-    this.el.insertBefore(c, this.markerLayer);
-    return c;
-  };
-
   MiniMap.prototype._bind = function () {
     var self = this, drag = null, pinch = null, lastTap = 0;
     var vp = this.el;
@@ -219,16 +192,7 @@
       if (!self._raf) self._raf = requestAnimationFrame(function () { self._raf = null; self.render(); });
     }
 
-    function end(e) {
-      var tap = drag && drag.moved < 8 && !pinch ? drag : null;
-      drag = null; pinch = null; self.render();
-      /* a touch that did not move is a tap — hand the caller the spot under
-         the finger (double-tap zoom has already fired by now and cleared drag) */
-      if (tap && self.ontap) {
-        var ll = self.unproject(tap.x, tap.y);
-        self.ontap({ lat: ll.lat, lon: ll.lon, x: tap.x, y: tap.y });
-      }
-    }
+    function end() { drag = null; pinch = null; self.render(); }
 
     vp.addEventListener('touchstart', start, { passive: true });
     vp.addEventListener('touchmove', move, { passive: false });
@@ -252,58 +216,28 @@
   };
 
   /* ---- tile sources ---------------------------------------------------- */
-  /* Government map services under Creative Commons Attribution, so nothing
-     here depends on a company's free tier. Geoscience Australia's caches are
-     in GDA94 (lat/lon), not Web Mercator, so they are asked for each tile's
-     bounding box through the export endpoint, which reprojects on the fly. */
-  var R = 6378137, HALF = Math.PI * R;
-  function tileBBox3857(z, x, y) {
-    var n = Math.pow(2, z);
-    return [x / n * 2 * HALF - HALF, HALF - (y + 1) / n * 2 * HALF, (x + 1) / n * 2 * HALF - HALF, HALF - y / n * 2 * HALF];
-  }
-  function gaExport(service) {
-    return function (z, x, y) {
-      var bb = tileBBox3857(z, x, y);
-      return 'https://services.ga.gov.au/gis/rest/services/' + service + '/MapServer/export?bbox=' +
-        bb.map(function (v) { return v.toFixed(2); }).join(',') + '&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=false&dpi=96&f=image';
-    };
-  }
-  /* NSW Spatial Services' cache extent (their published full extent, in
-     metres); outside it their tiles are blank */
-  var NSW_EXT = { x0: 15693108, x1: 17754693, y0: -4558115, y1: -3211289 };
-  function inNsw(z, x, y) {
-    var bb = tileBBox3857(z, x, y), cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
-    return cx >= NSW_EXT.x0 && cx <= NSW_EXT.x1 && cy >= NSW_EXT.y0 && cy <= NSW_EXT.y1;
-  }
-
   var Basemaps = {
     map: {
       name: 'Map',
-      url: gaExport('NationalBaseMap'),
-      attribution: 'Base map © Geoscience Australia (CC BY 4.0)', maxNativeZoom: 14
-    },
-    topo: {
-      name: 'Topo',
-      url: gaExport('AUSTopo_Topographic_Basemap'),
-      attribution: 'AUSTopo © Geoscience Australia (CC BY 4.0)', maxNativeZoom: 13
+      url: function (z, x, y) { return 'https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png'; },
+      attribution: '© OpenStreetMap contributors', maxNativeZoom: 18
     },
     satellite: {
       name: 'Satellite',
       url: function (z, x, y) {
-        if (inNsw(z, x, y)) return 'https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/' + z + '/' + y + '/' + x;
-        /* outside NSW there is no open imagery service yet; Esri fills the gap */
         return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/' + z + '/' + y + '/' + x;
       },
-      attribution: 'Imagery © State of NSW (Spatial Services), CC BY; outside NSW © Esri', maxNativeZoom: 18
+      attribution: 'Imagery © Esri', maxNativeZoom: 17
     },
-    streets: {
-      name: 'Streets',
-      url: function (z, x, y) { return 'https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Base_Map/MapServer/tile/' + z + '/' + y + '/' + x; },
-      attribution: 'NSW Base Map © State of NSW (Spatial Services), CC BY', maxNativeZoom: 19
+    ocean: {
+      name: 'Nautical',
+      url: function (z, x, y) {
+        return 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/' + z + '/' + y + '/' + x;
+      },
+      attribution: 'Ocean basemap © Esri', maxNativeZoom: 13
     }
   };
 
   global.MiniMap = MiniMap;
   global.MiniMap.Basemaps = Basemaps;
-  global.MiniMap.tileBBox3857 = tileBBox3857;
 })(typeof window !== 'undefined' ? window : globalThis);
