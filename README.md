@@ -114,9 +114,16 @@ is never a black box.
   the GitHub Action has fetched them, shifted by the published time
   differences for your spot. Without them, a global tide model estimate,
   clearly labelled as such.
-- **Rain radar** — [RainViewer](https://www.rainviewer.com), which ingests BOM
-  radar.
-- **Wind and swell maps** — [Windy](https://www.windy.com) embeds.
+- **Rain radar** — BOM's own frames, with [RainViewer](https://www.rainviewer.com)
+  (which ingests BOM radar) as the map view.
+- **Wind and swell maps** — drawn by the app (`js/overlay.js`): one Open-Meteo
+  request for a lattice of up to a hundred points covering the screen, then a
+  colour field, arrows and drifting particles on a canvas, with a slider
+  through the next three days and a tap-anywhere readout. No embed.
+- **Base maps** — Geoscience Australia's National Base Map and AUSTopo
+  (CC BY 4.0, requested per tile through their export endpoint so they land in
+  Web Mercator), NSW Spatial Services' aerial imagery and NSW Base Map
+  (CC BY). Outside NSW the satellite view falls back to Esri.
 - **Sun, moon, solunar** — calculated on the phone. Moon phase times land
   within about six minutes of published ephemeris; sunrise and sunset within a
   minute.

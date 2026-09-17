@@ -206,6 +206,12 @@
         <button data-m="wind">Wind</button>
         <button data-m="waves">Swell</button>
       </div>
+      <div class="seg mini" id="baseSeg" style="margin-top:8px;display:none">
+        <button data-b="map" class="on">Map</button>
+        <button data-b="topo">Topo</button>
+        <button data-b="satellite">Satellite</button>
+        <button data-b="streets">Streets</button>
+      </div>
     </div>
     <div class="card" id="radarPane">
       <div class="seg" id="radarSrc" style="margin-bottom:10px">
@@ -236,19 +242,20 @@
         <span class="maptime" id="mapTime">—</span>
       </div>
       <div class="radar-legend" id="radarLegend"></div>
-      <div class="mapbar" style="margin-top:10px">
-        <div class="seg" id="baseSeg" style="flex:1">
-          <button data-b="map" class="on">Map</button>
-          <button data-b="satellite">Satellite</button>
-          <button data-b="ocean">Nautical</button>
-        </div>
-      </div>
       <div class="mapattr" id="mapAttr"></div>
       </div>
     </div>
     <div class="card" id="windPane" style="display:none">
-      <iframe class="windy" id="windyFrame" title="Wind map" loading="lazy" referrerpolicy="no-referrer"></iframe>
-      <div class="mapattr">Animated wind and rain layers by Windy.com.</div>
+      <div class="mm" id="windMap" role="img" aria-label="Wind map"></div>
+      <div class="mapbar">
+        <button class="iconbtn" id="windPlay" aria-label="Play">
+          <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <input type="range" class="scrub" id="windScrub" min="0" max="0" value="0" aria-label="Forecast hour">
+        <span class="maptime" id="windTime">—</span>
+      </div>
+      <div class="ovlegend" id="windLegend"></div>
+      <div class="mapattr" id="windAttr"></div>
     </div>
     <div class="card" id="wavePane" style="display:none">
       <div class="seg" id="waveSeg" style="margin-bottom:10px">
@@ -256,8 +263,16 @@
         <button data-wo="swell1">Primary swell</button>
         <button data-wo="wwaves">Wind chop</button>
       </div>
-      <iframe class="windy" id="waveFrame" title="Swell map" loading="lazy" referrerpolicy="no-referrer"></iframe>
-      <div class="mapattr">ECMWF wave model layers by Windy.com. Height in metres, arrows show direction and period.</div>
+      <div class="mm" id="swellMap" role="img" aria-label="Swell map"></div>
+      <div class="mapbar">
+        <button class="iconbtn" id="swellPlay" aria-label="Play">
+          <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <input type="range" class="scrub" id="swellScrub" min="0" max="0" value="0" aria-label="Forecast hour">
+        <span class="maptime" id="swellTime">—</span>
+      </div>
+      <div class="ovlegend" id="swellLegend"></div>
+      <div class="mapattr" id="swellAttr"></div>
     </div>
     <div class="card">
       <h2>Straight to BOM</h2>
@@ -446,6 +461,7 @@
 <script src="./js/data.js"></script>
 <script src="./js/core.js"></script>
 <script src="./js/map.js"></script>
+<script src="./js/overlay.js"></script>
 <script src="./js/wind.js"></script>
 <script src="./js/app.js"></script>
 </body>
