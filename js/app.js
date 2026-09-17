@@ -88,15 +88,42 @@
     document.documentElement.classList.toggle('big', S.settings.textSize === 'large');
   }
 
+  var APP_VERSION = 'v18';
+
+  /* Last twenty errors, kept on the phone for the Diagnostics page. */
+  function diagLog(kind, msg, where) {
+    try {
+      var l = C.Store._get('nf.diag', []);
+      l.unshift({ t: Date.now(), k: kind, m: String(msg || '').slice(0, 300), w: where ? String(where).slice(0, 120) : '' });
+      C.Store._set('nf.diag', l.slice(0, 20));
+    } catch (e) {}
+  }
+  window.addEventListener('error', function (e) {
+    diagLog('error', e.message || (e.error && e.error.message) || 'error', (e.filename || '').split('/').pop() + ':' + (e.lineno || ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason; diagLog('promise', r && r.message ? r.message : String(r), r && r.stack ? String(r.stack).split('\n')[1] : '');
+  });
+
   function init() {
     applyTheme();
+    /* his data lives in localStorage; the IndexedDB mirror only speaks up
+       when that has come up empty */
+    C.Store.restore().then(function (restored) {
+      if (!restored) return;
+      S.settings = C.Store.settings(); applyTheme();
+      setSpot(S.settings.spot, true); load(true);
+      toast('Restored your settings and log');
+    });
+    C.Store.pruneCache();
+    C.Store.persist();
     bindTabs(); bindSettings(); bindMaps(); bindFish();
     el('spotBtn').addEventListener('click', openSpotPicker);
     el('gpsBtn').addEventListener('click', function () { locate(true); });
     el('gearBtn').addEventListener('click', function () { showView('me'); });
     window.addEventListener('online', function () { load(true); });
     bindSheetSwipe();
-    if (!C.Store._get('nf.onboarded', false)) setTimeout(openWelcome, 600);
+    setTimeout(function () { if (!C.Store._get('nf.onboarded', false)) openWelcome(); }, 700);
     el('refreshBtn').addEventListener('click', function () { load(true); });
     el('fab').addEventListener('click', function () { openCatchForm(); });
     el('addCatchBtn').addEventListener('click', function () { openCatchForm(); });
@@ -119,6 +146,7 @@
     el('blankBtn').addEventListener('click', function () { openCatchForm(null, true); });
     el('shareLogBtn').addEventListener('click', shareLog);
     el('wipeBtn').addEventListener('click', wipeApp);
+    el('diagBtn').addEventListener('click', openDiagnostics);
     el('backupBtn').addEventListener('click', backup);
     el('restoreBtn').addEventListener('click', restore);
     window.DFFP = { S: S, planDay: planDay, bestBets: function () { return S.bets; }, recompute: function () { computeScores(); renderAll(); } };
@@ -154,7 +182,7 @@
       var cur = document.querySelector('.view.on');
       if (cur) S.scrollMemo[cur.id] = window.scrollY;
       C.Store._set('nf.tab', b.dataset.v);
-      Array.prototype.forEach.call(tabs.children, function (x) { x.classList.toggle('on', x === b); });
+      Array.prototype.forEach.call(tabs.children, function (x) { x.classList.toggle('on', x === b); if (x === b) x.setAttribute('aria-current', 'page'); else x.removeAttribute('aria-current'); });
       ['now', 'forecast', 'tides', 'maps', 'fish', 'lb', 'me'].forEach(function (v) {
         var node = el('v-' + v); if (node) node.classList.toggle('on', v === b.dataset.v);
       });
@@ -174,7 +202,7 @@
       ['now', 'forecast', 'tides', 'maps', 'fish', 'lb', 'me'].forEach(function (x) {
         el('v-' + x).classList.toggle('on', x === v);
       });
-      Array.prototype.forEach.call(el('tabs').children, function (x) { x.classList.remove('on'); });
+      Array.prototype.forEach.call(el('tabs').children, function (x) { x.classList.remove('on'); x.removeAttribute('aria-current'); });
       el('fab').style.display = 'none';
       window.scrollTo(0, 0);
     }
@@ -351,13 +379,14 @@
 
     var jobs = [
       C.Api.weather(S.lat, S.lon, S.settings.model).then(function (r) { S.wx = r.data; S.stale = r.stale; S.fellBack = !!r.fellBack; S.wxAt = r.cachedAt; })
-        .catch(function (e) { S.lastError = e; S.wx = S.wx || null; }),
+        .catch(function (e) { S.lastError = e; S.wx = S.wx || null; diagLog('fetch', 'forecast: ' + (e && e.message ? e.message : e)); }),
       C.Api.local('bom.json').then(function (j) { S.bom = j; }).catch(function () {}),
       C.Api.local('tides.json').then(function (j) { S.bomTides = j; }).catch(function () {}),
       C.Api.live('obs.json').then(function (r) { S.live = r.data; }).catch(function () { S.live = null; }),
       C.Api.live('radar.json', 3).then(function (r) { S.liveRadar = r.data; }).catch(function () { S.liveRadar = null; }),
       C.Api.live('history.json', 4).then(function (r) { S.history = r.data; }).catch(function () { S.history = S.history || null; }),
-      C.Api.ensemble(S.lat, S.lon).then(function (r) { S.ens = r.data; }).catch(function () { S.ens = null; })
+      C.Api.ensemble(S.lat, S.lon).then(function (r) { S.ens = r.data; }).catch(function () { S.ens = null; }),
+      C.Api.models(S.lat, S.lon).then(function (r) { S.mm = r.data; }).catch(function () { S.mm = null; })
     ];
     if (sea) {
       jobs.push(C.Api.marine(sea.lat, sea.lon).then(function (r) { S.marine = r.data; S.marineKm = r.offshoreKm; }).catch(function () { S.marine = null; }));
@@ -374,6 +403,7 @@
       S.obsDelta = S.wx && S.obs ? C.Obs.apply(S.wx, S.obs, 6) : null;
       S.spread = C.Ensemble.spread(S.ens);
       S.rain = C.Ensemble.rain(S.ens);
+      S.mspread = C.Models.spread(S.mm);
       if (!S.wx) {
         el('verdict').textContent = 'No forecast yet';
         el('verdictSub').textContent = 'Check your connection and hit refresh.';
@@ -541,6 +571,7 @@
       });
     }
     S.shownScore = d.score;
+    el('dial').setAttribute('role', 'img'); el('dial').setAttribute('aria-label', 'Bite score ' + d.score + ' out of 100, ' + v.label);
     el('verdict').textContent = v.label;
     el('verdict').style.color = toneColor(v.tone);
 
@@ -557,12 +588,7 @@
       r.good.slice(0, 2).map(function (x) { return '<span class="chip pos">' + esc(x) + '</span>'; }).join('') +
       r.bad.slice(0, 2).map(function (x) { return '<span class="chip neg">' + esc(x) + '</span>'; }).join('');
 
-    el('factors').innerHTML = d.parts.filter(function (p) { return p.w > 0; }).map(function (p) {
-      var pct = Math.round(p.f * 100);
-      return '<div class="factor"><span>' + esc(p.label) + '</span>' +
-        '<span class="bar"><i style="width:' + pct + '%;background:' + scoreColor(pct) + '"></i></span>' +
-        '<span class="val">' + pct + '</span></div>';
-    }).join('');
+    renderWhy(d);
 
     var foot = [];
     if (sp && d.seasonMult < 1) foot.push(sp + ' is ' + (d.seasonMult < 0.6 ? 'well out of its main run' : 'a bit off its peak') + ' this month.');
@@ -629,6 +655,38 @@
     renderKindSeg(); renderBaro(); renderStation(); renderTideNow(); renderSunMoon(); renderWindows(); renderBomText();
   }
 
+  /* Why this score: every factor in order of how much it counts, what it
+     reads now, and how that compares with the usual reading at this spot
+     this week — so a 61 is explainable in one glance. */
+  function renderWhy(d) {
+    var parts = d.parts.filter(function (p) { return p.w > 0; }).slice().sort(function (a, b) { return b.w - a.w; });
+    var total = parts.reduce(function (s, p) { return s + p.w; }, 0) || 1;
+    var base = S.factorBase || {}, lift = null, drag = null;
+    parts.forEach(function (p) {
+      p.share = Math.round(100 * p.w / total);
+      p.delta = base[p.key] != null ? Math.round((p.f - base[p.key]) * 100) : null;
+      /* what this factor moves the final number by, relative to its usual reading */
+      p.pts = p.delta != null ? Math.round(p.delta * p.w / total) : null;
+      if (p.pts != null && p.pts >= 2 && (!lift || p.pts > lift.pts)) lift = p;
+      if (p.pts != null && p.pts <= -2 && (!drag || p.pts < drag.pts)) drag = p;
+    });
+    var sum = [];
+    if (lift) sum.push('<b>' + esc(lift.label) + '</b> is doing the most for you right now (+' + lift.pts + ' on the score)');
+    if (drag) sum.push('<b>' + esc(drag.label) + '</b> is costing the most (−' + Math.abs(drag.pts) + ')');
+    el('whyLine').innerHTML = sum.length ? sum.join('. ') + ', compared with an average hour at this spot this week.' : (parts.length ? 'Everything is reading about where it usually does at this spot this week.' : '');
+    el('whyLine').style.display = sum.length || parts.length ? '' : 'none';
+    el('factors').innerHTML = parts.map(function (p) {
+      var pct = Math.round(p.f * 100);
+      var sub = p.share + '% of score' + (p.mult && Math.abs(p.mult - 1) > 0.02 ? ' · ×' + p.mult.toFixed(2) : '');
+      var dl = p.delta == null ? '' : Math.abs(p.delta) < 6 ? '<em class="d0">usual</em>' :
+        '<em class="' + (p.delta > 0 ? 'dp' : 'dn') + '">' + (p.delta > 0 ? '+' : '−') + Math.abs(p.delta) + ' vs usual</em>';
+      return '<div class="factor" role="listitem" aria-label="' + esc(p.label + ' ' + pct + ' out of 100, ' + sub + (p.delta != null ? ', ' + (p.delta > 0 ? 'up ' : 'down ') + Math.abs(p.delta) + ' on the usual reading here' : '')) + '">' +
+        '<span class="fl">' + esc(p.label) + '<small>' + esc(sub) + '</small></span>' +
+        '<span class="bar"><i style="width:' + pct + '%;background:' + scoreColor(pct) + '"></i>' + dl + '</span>' +
+        '<span class="val">' + pct + '</span></div>';
+    }).join('');
+  }
+
   function renderBaro() {
     var card = el('baroCard'), H = S.wx && S.wx.hourly;
     if (!H || !H.pressure_msl) { card.style.display = 'none'; return; }
@@ -651,7 +709,7 @@
         '<text x="2" y="' + (Y(v) + 3.5).toFixed(1) + '" font-size="9.5" fill="var(--ink3)">' + Math.round(v) + '</text>';
     });
     var obsDot = S.obs && S.obs.pressure != null ? '<circle cx="' + nx.toFixed(1) + '" cy="' + Y(S.obs.pressure).toFixed(1) + '" r="3.5" fill="var(--accent2)"/>' : '';
-    el('baroChart').innerHTML = '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:96px">' + grid +
+    el('baroChart').innerHTML = '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:96px" role="img" aria-label="' + esc('Barometer from yesterday to tomorrow, between ' + Math.round(min) + ' and ' + Math.round(max) + ' hectopascals' + (S.obs && S.obs.pressure != null ? '. Station reads ' + n1(S.obs.pressure) + ' now' : '')) + '">' + grid +
       '<line x1="' + nx.toFixed(1) + '" y1="4" x2="' + nx.toFixed(1) + '" y2="' + (h - padB) + '" stroke="var(--accent2)" stroke-width="1.5" stroke-dasharray="4 3"/>' +
       '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round"/>' + obsDot +
       '<text x="' + (padL + 2) + '" y="' + (h - 3) + '" font-size="9.5" fill="var(--ink3)">yesterday</text>' +
@@ -693,9 +751,18 @@
     var hist = S.history && S.history.stations && S.history.stations[o.id];
     var sc = el('stationChart');
     if (hist && hist.data && hist.data.length > 2 && typeof WindCharts !== 'undefined') {
-      WindCharts.liveWind(sc, hist.data, chartOpts({ hours: 6, compact: true, now: hist.data[hist.data.length - 1][0] * 1000 }));
+      WindCharts.liveWind(sc, hist.data, chartOpts({ hours: 6, compact: true, now: hist.data[hist.data.length - 1][0] * 1000, name: o.name, forecast: modelWindSeries() }));
+      var cmp = C.Obs.compare(S.wx, hist.data, 12), line = C.Obs.compareText(cmp, o.name);
+      if (line) sc.insertAdjacentHTML('beforeend', '<div class="muted" style="margin-top:6px">' + esc(line) + ' Dashed line is the forecast.</div>');
       sc.style.display = '';
     } else { sc.innerHTML = ''; sc.style.display = 'none'; }
+  }
+
+  /* The model's own wind for the spot, before any station nudging, as the
+     dashed comparison line on the live charts. */
+  function modelWindSeries() {
+    if (!S.wx || !S.wx.hourly) return null;
+    return { time: S.wx.hourly.time, wind: (S.wx._raw && S.wx._raw.wind_speed_10m) || S.wx.hourly.wind_speed_10m };
   }
 
   /* shared options for the Seabreeze-style charts */
@@ -735,14 +802,22 @@
       wdir = H.time.map(function (ts) { return C.sampleSeries(M.time, M.swell_wave_direction, ts * 1000); });
     }
     var D2 = S.wx.daily || {};
+    var lo = null, hi = null, ms = S.mspread;
+    if (ms) {
+      lo = H.time.map(function (ts) { return C.sampleSeries(ms.time, ms.lo, ts * 1000); });
+      hi = H.time.map(function (ts) { return C.sampleSeries(ms.time, ms.hi, ts * 1000); });
+    }
     WindCharts.windWave(box, {
       time: H.time, wind: H.wind_speed_10m, gust: H.wind_gusts_10m, dir: H.wind_direction_10m,
-      wave: wave, wavePeriod: per, waveDir: wdir, code: H.weather_code, rainPct: rainPct, rainMm: H.precipitation,
+      wave: wave, wavePeriod: per, waveDir: wdir, code: H.weather_code, rainPct: rainPct, rainMm: H.precipitation, windLo: lo, windHi: hi,
       daily: { time: D2.time || [], code: D2.weather_code || [], tmin: D2.temperature_2m_min || [], tmax: D2.temperature_2m_max || [] }
     }, chartOpts({ hours: hours, stepHours: hours <= 48 ? 1 : (hours <= 96 ? 2 : 3), fmtDay: function (ms) { return hours <= 48 ? fDayLong.format(new Date(ms)) : dayName(ms); } }));
+    var agree = ms ? C.Models.label(C.Models.range(ms, Date.now(), Date.now() + Math.min(hours, 48) * HOUR)) : null;
     el('wwNote').textContent = (S.fellBack ? 'Multi-model blend' : (S.settings.model === 'bom_access_global' ? 'BOM ACCESS-G' : 'Multi-model blend')) +
       ' wind at 10 m' + (wave ? ', waves from the open-water point off ' + (S.spot ? S.spot.name : 'the spot') : '') +
-      (S.rain ? ', chance of rain from BOM’s ' + (S.spread ? S.spread.members : '') + '-member ensemble' : '') + '. Arrows point where the wind is going — touch and drag for the detail.';
+      (S.rain ? ', chance of rain from BOM’s ' + (S.spread ? S.spread.members : '') + '-member ensemble' : '') +
+      (ms ? '. Grey band is the spread between ' + ms.names.join(', ') + (agree ? ' — ' + agree.text.toLowerCase() + ' for the next two days' : '') : '') +
+      '. Arrows point where the wind is going — touch and drag for the detail.';
   }
 
   function renderWaveChart() {
@@ -778,17 +853,21 @@
     var show = ids.filter(function (x, i) { return x.fav || i < 3; }).filter(function (x) { return x.fav || x.km <= 150; }).slice(0, 7);
     var fetched = S.history.fetched ? S.history.fetched * 1000 : null;
     el('lwAge').textContent = fetched ? 'as of ' + t(fetched) : '';
+    var fc = modelWindSeries();
     box.innerHTML = show.map(function (x) {
       var last = x.st.data[x.st.data.length - 1];
+      var near = x.km <= 40 && fc, cmp = near ? C.Obs.compare(S.wx, x.st.data, Math.min(12, (S.history.hours || 12))) : null;
+      var line = cmp ? C.Obs.compareText(cmp, x.st.name) : null;
       return '<div class="lw" data-sid="' + x.id + '"><div class="lwh"><div><b>' + esc(x.st.name) + '</b> <span class="lwm">live wind report · ' + Math.round(x.km) + ' km</span></div>' +
-        '<button class="star' + (x.fav ? ' on' : '') + '" data-sfav="' + x.id + '" aria-label="Favourite station">' + (x.fav ? '★' : '☆') + '</button></div>' +
+        '<button class="star' + (x.fav ? ' on' : '') + '" data-sfav="' + x.id + '" aria-label="' + (x.fav ? 'Unfavourite' : 'Favourite') + ' ' + esc(x.st.name) + '" aria-pressed="' + (x.fav ? 'true' : 'false') + '">' + (x.fav ? '★' : '☆') + '</button></div>' +
         '<div class="lwm">' + (last ? 'Latest ' + t(last[0] * 1000) + ' — ' + wv(last[1]) + ' ' + wu() + (last[2] != null ? ', gusting ' + wv(last[2]) : '') + ' ' + C.degToCompass(last[3]) : '') + '</div>' +
-        '<div class="wwrap" data-chart="' + x.id + '"></div></div>';
+        '<div class="wwrap" data-chart="' + x.id + '"></div>' +
+        (line ? '<div class="lwm" style="margin-top:4px">' + esc(line) + ' Dashed line is the forecast for ' + esc(S.spot ? S.spot.name : 'your spot') + '.</div>' : '') + '</div>';
     }).join('') || '<div class="empty">No station within 150 km has readings. Star one further away to keep it here.</div>';
     show.forEach(function (x) {
       var wrap = box.querySelector('[data-chart="' + x.id + '"]');
       var last = x.st.data[x.st.data.length - 1];
-      WindCharts.liveWind(wrap, x.st.data, chartOpts({ hours: Math.min(12, (S.history.hours || 12)), now: last ? last[0] * 1000 : Date.now() }));
+      WindCharts.liveWind(wrap, x.st.data, chartOpts({ hours: Math.min(12, (S.history.hours || 12)), now: last ? last[0] * 1000 : Date.now(), name: x.st.name, forecast: x.km <= 40 ? fc : null }));
     });
     box.onclick = function (e) {
       var b = e.target.closest('button[data-sfav]'); if (!b) return;
@@ -855,7 +934,7 @@
       return (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1);
     }).join(' ');
     var nx = (now - t0) / (t1 - t0) * w;
-    return '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" style="height:54px">' +
+    return '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" style="height:54px" aria-hidden="true">' +
       '<path d="' + path + ' L' + w + ' ' + h + ' L0 ' + h + 'Z" fill="var(--t-accent-16)"/>' +
       '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2"/>' +
       '<line x1="' + nx + '" y1="0" x2="' + nx + '" y2="' + h + '" stroke="var(--accent2)" stroke-width="1.5" stroke-dasharray="3 3"/>' +
@@ -976,7 +1055,7 @@
       }
     }
     var nx = X(Math.max(t0, Math.min(t1, now)));
-    el('tempChart').innerHTML = '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:210px">' + grid +
+    el('tempChart').innerHTML = '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:210px" role="img" aria-label="' + esc('Air temperature for the next seven days. Daily lows and highs are labelled on the chart') + '">' + grid +
       '<path d="' + path + ' L' + X(t1).toFixed(1) + ' ' + (h - padB) + ' L' + X(t0).toFixed(1) + ' ' + (h - padB) + 'Z" fill="var(--t-accent2-12)"/>' +
       (fpath ? '<path d="' + fpath + '" fill="none" stroke="var(--ink3)" stroke-width="1.4" stroke-dasharray="4 3"/>' : '') +
       '<path d="' + path + '" fill="none" stroke="var(--accent2)" stroke-width="2.4" stroke-linejoin="round"/>' +
@@ -1032,7 +1111,9 @@
     var area = path + ' L' + X(t1).toFixed(1) + ' ' + (h - 26) + ' L' + X(t0).toFixed(1) + ' ' + (h - 26) + 'Z';
     var nowX = X(Math.max(t0, Math.min(t1, Date.now())));
 
-    el('scoreChart').innerHTML = '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:200px">' +
+    var topWin = S.windows[0];
+    el('scoreChart').innerHTML = '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:200px" role="img" aria-label="' +
+      esc('Bite score for the next seven days' + (topWin ? '. Best window ' + relDay(topWin.start) + ' ' + t(topWin.start) + ' to ' + t(topWin.end) + ', peaking at ' + topWin.peak : '') + '. Touch and drag for each hour') + '">' +
       nights + ticks + bars +
       '<path d="' + area + '" fill="var(--t-accent-14)"/>' +
       '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linejoin="round"/>' +
@@ -1101,6 +1182,9 @@
       var sdDay = null, sdN = 0, sdSum = 0;
       S.series.forEach(function (p) { if (p.t >= ts && p.t < ts + DAY && p.sd != null) { sdSum += p.sd; sdN++; } });
       if (sdN) sdDay = C.Ensemble.label(sdSum / sdN);
+      /* daylight hours only — nobody cares whether the models agree at 2 am */
+      var mr = S.mspread ? C.Models.range(S.mspread, ts + 5 * HOUR, ts + 20 * HOUR) : null, ml = C.Models.label(mr);
+      var mTag = ml ? ' · <span style="color:' + toneColor(ml.tone) + '" title="' + ml.text + '">models ±' + wv(mr / 2) + ' ' + wu() + '</span>' : '';
       var di = Math.round((A.startOfLocalDay(new Date(ts), TZ).valueOf() - A.startOfLocalDay(new Date(), TZ).valueOf()) / DAY);
       out.push('<div class="day' + (di >= 0 && di < 7 ? ' tap" data-di="' + di : '') + '"><div><div class="dn">' + relDay(ts) + '</div><div class="dd">' + fDate.format(new Date(ts)) +
         (sdDay ? '<br><span style="color:' + toneColor(sdDay.tone) + '">' + sdDay.text.split(' ')[0] + ' conf.</span>' : '') + '</div></div>' +
@@ -1109,7 +1193,7 @@
         (Dy.precipitation_sum[i] > 0.2 ? ' · ' + n1(Dy.precipitation_sum[i]) + ' mm' : '') + '</div>' +
         '<div class="dw">' + arrow(Dy.wind_direction_10m_dominant[i], 12) + ' ' + wv(Dy.wind_speed_10m_max[i]) + ' ' + wu() + ' max' +
         (swell != null ? ' · swell ' + n1(swell) + ' m' : '') +
-        (dayWins.length ? ' · best ' + t(dayWins[0].start) : '') + '</div></div>' +
+        (dayWins.length ? ' · best ' + t(dayWins[0].start) : '') + mTag + '</div></div>' +
         '<div class="pill" style="background:' + scoreColor(best) + '">' + best + '</div></div>');
     }
     el('dayList').innerHTML = out.join('');
@@ -1310,7 +1394,8 @@
       var nx = X(Date.now());
       nowLine = '<line x1="' + nx.toFixed(1) + '" y1="8" x2="' + nx.toFixed(1) + '" y2="' + (h - padB) + '" stroke="var(--accent2)" stroke-width="1.8" stroke-dasharray="4 3"/>';
     }
-    return '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:190px">' + bands + hours +
+    var spoken = C.Tides.extremesForDay(S.tide, t0).map(function (e) { return e.type + ' ' + t(e.t) + ' ' + n1(e.h) + ' metres'; }).join(', ');
+    return '<svg class="chart" viewBox="0 0 ' + w + ' ' + h + '" style="height:190px" role="img" aria-label="' + esc('Tide for the day: ' + (spoken || 'no highs or lows listed') + '. Shaded bands are night and moon feeding periods') + '">' + bands + hours +
       '<path d="' + path + ' L' + X(pts[pts.length - 1][0]).toFixed(1) + ' ' + (h - padB) + ' L' + X(pts[0][0]).toFixed(1) + ' ' + (h - padB) + 'Z" fill="var(--t-accent-15)"/>' +
       '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2.4"/>' + labels + nowLine +
       '<text x="2" y="' + (Y(hi) + 4).toFixed(1) + '" font-size="10" fill="var(--ink3)">' + n1(hi) + 'm</text>' +
@@ -1752,14 +1837,18 @@
 
   function seg(id, key, fn) {
     var node = el(id);
+    node.setAttribute('role', 'group');
     node.addEventListener('click', function (e) {
       var b = e.target.closest('button[data-' + key + ']'); if (!b) return;
-      Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); });
+      Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
       fn(b.dataset[key]);
     });
   }
   function setSeg(id, key, val) {
-    Array.prototype.forEach.call(el(id).children, function (x) { x.classList.toggle('on', x.dataset[key] === String(val)); });
+    Array.prototype.forEach.call(el(id).children, function (x) {
+      var on = x.dataset[key] === String(val);
+      x.classList.toggle('on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
   }
 
   function renderSettings() {
@@ -1999,8 +2088,55 @@
       setTimeout(function () { b.dataset.armed = ''; b.textContent = 'Start fresh — wipe settings and log'; b.classList.remove('danger'); }, 6000);
       return;
     }
-    C.Store.wipe();
-    location.reload();
+    C.Store.wipe().then(function () { location.reload(); });
+  }
+
+  function fmtBytes(n) { return n == null ? '—' : n < 1024 ? n + ' B' : n < 1048576 ? Math.round(n / 1024) + ' KB' : (Math.round(n / 104857.6) / 10) + ' MB'; }
+
+  /* Everything needed to work out why something is wrong on his phone,
+     without a server: versions, storage, feeds, recent errors. Copies as text. */
+  function openDiagnostics() {
+    var sizes = C.Store.sizes(), errs = C.Store._get('nf.diag', []);
+    var swState = 'not registered';
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) swState = 'active';
+      else if ('serviceWorker' in navigator) swState = 'registered, not controlling yet';
+    } catch (e) {}
+    var standalone = false;
+    try { standalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches; } catch (e) {}
+    var rows = [
+      ['App', APP_VERSION + ' · ' + (standalone ? 'home screen' : 'browser tab') + ' · offline cache ' + swState],
+      ['Device', (navigator.userAgent || '').replace(/Mozilla\/5\.0 \(/, '(').slice(0, 110)],
+      ['Online', navigator.onLine === false ? 'no' : 'yes'],
+      ['Spot', (S.spot ? S.spot.name + ' (' + S.spot.id + ')' : '—') + ' · ' + (S.lat != null ? S.lat.toFixed(3) + ', ' + S.lon.toFixed(3) : '') + (S.gpsFix ? ' · GPS fix ' + Math.round(S.gpsFix.km) + ' km from spot' : '')],
+      ['Forecast', S.wx ? 'fetched ' + t(S.wxAt) + (S.stale ? ' (stale copy)' : '') + (S.fellBack ? ' · blend fallback' : '') : 'none' + (S.lastError ? ' — ' + (S.lastError.message || S.lastError) : '')],
+      ['Feeds', 'marine ' + (S.marine ? 'ok' : '—') + ' · tides ' + (S.tide ? S.tide.source : '—') + ' · live obs ' + (S.live ? 'ok' : '—') + ' · history ' + (S.history ? 'ok' : '—') + ' · radar ' + (S.liveRadar ? 'ok' : '—') + ' · ensemble ' + (S.spread ? S.spread.members + ' members' : '—') + ' · models ' + (S.mspread ? S.mspread.names.join('/') : '—')],
+      ['Your data', fmtBytes(sizes.user) + ' · log ' + C.Store.log().length + ' entries · ' + C.Store.customs().length + ' custom places · mirror ' + (C.Store.mirroredAt ? 'written ' + t(C.Store.mirroredAt) : 'not written this session')],
+      ['Cache', fmtBytes(sizes.cache) + ' of forecasts kept for offline'],
+      ['Storage', 'checking…']
+    ];
+    function html() {
+      return '<h3>Diagnostics</h3><div class="sub">If something looks wrong, copy this and send it to Jake.</div>' +
+        '<div id="diagRows">' + rows.map(function (r) { return '<div class="diag"><b>' + esc(r[0]) + '</b><span>' + esc(r[1]) + '</span></div>'; }).join('') + '</div>' +
+        '<h3 style="margin-top:14px">Recent errors</h3>' +
+        (errs.length ? errs.map(function (e) { return '<div class="diag err"><b>' + esc(t(e.t)) + '</b><span>' + esc(e.m) + (e.w ? ' <i>' + esc(e.w) + '</i>' : '') + '</span></div>'; }).join('') : '<div class="muted">None recorded.</div>') +
+        '<div class="row" style="margin-top:14px;gap:8px"><button class="btn small" id="diagCopy">Copy</button><button class="btn ghost small" id="diagClear">Clear errors</button></div>';
+    }
+    openSheet(html());
+    function wire() {
+      el('diagCopy').onclick = function () {
+        var text = 'Dawson’s Fish Finder Pro diagnostics\n' + rows.map(function (r) { return r[0] + ': ' + r[1]; }).join('\n') +
+          '\n\nErrors:\n' + (errs.length ? errs.map(function (e) { return t24(e.t) + ' ' + e.k + ' ' + e.m + (e.w ? ' @ ' + e.w : ''); }).join('\n') : 'none');
+        shareText(text, 'Fish Finder diagnostics');
+      };
+      el('diagClear').onclick = function () { C.Store._set('nf.diag', []); errs = []; el('sheetBody').innerHTML = html(); wire(); };
+    }
+    wire();
+    C.Store.persistStatus().then(function (st) {
+      rows[rows.length - 1][1] = (st.persisted === true ? 'protected from clean-up' : st.persisted === false ? 'not protected — iOS may clear it if the app is unused for weeks' : 'unknown') +
+        (st.usage != null ? ' · ' + fmtBytes(st.usage) + ' used' : '') + (st.quota != null ? ' of ' + fmtBytes(st.quota) : '');
+      var box = el('diagRows'); if (box) box.innerHTML = rows.map(function (r) { return '<div class="diag"><b>' + esc(r[0]) + '</b><span>' + esc(r[1]) + '</span></div>'; }).join('');
+    });
   }
 
   function dataStatus() {
@@ -2049,11 +2185,12 @@
   function renderAbout() {
     var R = D.RULES;
     el('about').innerHTML =
-      '<p><b>Where the numbers come from.</b> Forecast from the Bureau of Meteorology ACCESS-G model (or a multi-model blend if you switch it), served through Open-Meteo. Swell, sea state and water temperature from Open-Meteo Marine. Rain radar from RainViewer, which ingests BOM radar. Wind and swell maps by Windy. Tides are official BOM predictions when the repository has them, otherwise a global tide model estimate. Sun, moon and feeding times are calculated on your phone.</p>' +
-      '<p><b>Bureau of Meteorology.</b> This product is based on Bureau of Meteorology information that has subsequently been modified. The Bureau does not necessarily support or endorse, or have any connection with, the product.</p>' +
+      '<p><b>Where the numbers come from.</b> Forecast from the Bureau of Meteorology ACCESS-G model (or a multi-model blend if you switch it), with ECMWF and GFS alongside for the model-spread band, all served through Open-Meteo. Swell, sea state and water temperature from Open-Meteo Marine. Rain radar straight from BOM, with RainViewer as the map view. Wind and swell maps by Windy. Tides are official BOM predictions when the repository has them, otherwise a global tide model estimate. Live station readings from BOM. Sun, moon and feeding times are calculated on your phone.</p>' +
+      '<p><b>Attribution.</b> <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a> (CC BY 4.0). <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">Weather data by RainViewer</a>. Map layers by <a href="https://www.windy.com/" target="_blank" rel="noopener">Windy.com</a>. Base maps &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>; imagery and nautical tiles &copy; Esri. Fishing rules from NSW DPIRD.</p>' +
+      '<p><b>Bureau of Meteorology.</b> This product is based on Bureau of Meteorology information that has subsequently been modified. The Bureau does not necessarily support or endorse, or have any connection with, the product. Always check the Bureau&rsquo;s own warnings before heading out.</p>' +
       '<p><b>Fishing rules</b> checked against NSW DPIRD, ' + esc(R.asAt) + '. They change — the official tables win. Report illegal fishing on 1800 043 536.</p>' +
-      '<p><b>Not for navigation.</b> Tide heights and swell figures are guidance, not depth or safety data. Rock fishing kills people in NSW every year: wear a lifejacket, watch the sea for ten minutes before you climb down, and never fish alone.</p>' +
-      '<p><b>Dawson&rsquo;s Fish Finder Pro.</b> Everything you enter stays on this phone.</p>';
+      '<p><b>Not for navigation.</b> Tide heights and swell figures are guidance, not depth or safety data. The bite score is an estimate, not a promise. Rock fishing kills people in NSW every year: wear a lifejacket, watch the sea for ten minutes before you climb down, and never fish alone.</p>' +
+      '<p><b>Dawson&rsquo;s Fish Finder Pro ' + APP_VERSION + '.</b> Everything you enter stays on this phone, mirrored to a second store on the phone so a browser clean-up cannot lose it. Back it up from time to time anyway.</p>';
   }
 
   /* ================= sheet & spot picker ============================= */
@@ -2085,7 +2222,8 @@
       '<div class="field"><label>How you mostly fish</label><div class="seg" id="wAccess"><button data-a="land" class="on">Land based</button><button data-a="boat">In the boat</button></div></div>' +
       '<div class="field"><label>What you chase most (tap a few)</label><div class="chips" id="wSpecies">' + chips + '</div></div>' +
       '<button class="btn" id="wGo">Use my location and get started</button>' +
-      '<button class="btn ghost" id="wSkip" style="margin-top:8px">Pick a spot instead</button>');
+      '<button class="btn ghost" id="wSkip" style="margin-top:8px">Pick a spot instead</button>' +
+      '<div class="footnote" style="margin-top:12px">Forecasts and tides are guidance, not safety or navigation data — check BOM warnings before you go, and stay off the rocks in a big sea. Everything you enter stays on this phone.</div>');
     var picked = [];
     el('wAccess').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-a]'); if (!b) return;

@@ -162,23 +162,39 @@
         g += '<text x="' + X(tt).toFixed(1) + '" y="' + (H - bottom + 12) + '" font-size="8.5" fill="var(--ink3)" text-anchor="middle">' + esc(o.fmtTime(tt).replace(':00', '')) + '</text>';
       }
     }
+    /* where the models disagree: a band from the lowest to the highest wind
+       any of them has, drawn under the arrows */
+    if (d.windLo && d.windHi) {
+      var up = '', down = '', bs = false;
+      for (i = 0; i < d.time.length; i++) {
+        var tb = d.time[i] * 1000; if (tb < t0 - HOUR || tb > t1 + HOUR || d.windLo[i] == null || d.windHi[i] == null) continue;
+        var xb = Math.min(x1, Math.max(x0, X(tb)));
+        up += (bs ? 'L' : 'M') + xb.toFixed(1) + ' ' + Yk(Math.min(d.windHi[i], ktMax)).toFixed(1) + ' ';
+        down = 'L' + xb.toFixed(1) + ' ' + Yk(Math.min(d.windLo[i], ktMax)).toFixed(1) + ' ' + down; bs = true;
+      }
+      if (bs) g += '<path d="' + up + down + 'Z" fill="var(--t-ink-12)" opacity=".9"/>';
+    }
     /* arrows */
     var step = o.stepHours * HOUR, size = o.hours <= 48 ? 15 : (o.hours <= 96 ? 13 : 11);
-    var arrows = '', gusts = '';
+    var arrows = '', gusts = '', lo = Infinity, hiK = 0;
     for (var at = Math.ceil(t0 / step) * step; at <= t1; at += step) {
       var kt = sample(d.time, d.wind, at), dir = sample(d.time, d.dir, at), gu = d.gust ? sample(d.time, d.gust, at) : null;
       if (kt == null) continue;
+      if (kt < lo) lo = kt; if (kt > hiK) hiK = kt;
       if (gu != null && o.hours <= 48) gusts += arrow(X(at), Yk(Math.min(gu, ktMax)), dir, size - 2, 'var(--t-ink-12)', 1, 'rgba(0,0,0,0)');
       arrows += arrow(X(at), Yk(Math.min(kt, ktMax)), dir, size, windColor(kt));
     }
     g += gusts + arrows;
     /* now line */
     if (o.now >= t0 && o.now <= t1) g += '<line x1="' + X(o.now).toFixed(1) + '" y1="' + (top - 4) + '" x2="' + X(o.now).toFixed(1) + '" y2="' + (H - bottom) + '" stroke="var(--accent2)" stroke-width="1.6" stroke-dasharray="4 3"/>';
-    wrap.innerHTML = '<svg class="chart wchart" viewBox="0 0 ' + W + ' ' + H + '" style="height:' + H + 'px">' + g + '</svg>';
+    var label = 'Wind and wave forecast for the next ' + o.hours + ' hours. Wind between ' + (lo === Infinity ? 0 : Math.round(lo)) + ' and ' + Math.round(hiK) + ' knots' +
+      (d.wave ? ', waves up to ' + (Math.round(maxWave * 10) / 10).toFixed(1) + ' metres' : '') + '. Touch and drag for each hour.';
+    wrap.innerHTML = '<svg class="chart wchart" viewBox="0 0 ' + W + ' ' + H + '" style="height:' + H + 'px" role="img" aria-label="' + esc(label) + '">' + g + '</svg>';
     var svg = wrap.querySelector('svg');
     bindScrub(wrap, svg, { x0: x0, x1: x1, t0: t0, t1: t1, width: W, onTip: function (ms) {
       var kt = sample(d.time, d.wind, ms), gu = d.gust ? sample(d.time, d.gust, ms) : null, dir = sample(d.time, d.dir, ms);
       if (kt == null) return null;
+      var mlo = d.windLo ? sample(d.time, d.windLo, ms) : null, mhi = d.windHi ? sample(d.time, d.windHi, ms) : null;
       var code = null, ci = 0, best = 1e18;
       for (var j = 0; j < d.time.length; j++) { var dd = Math.abs(d.time[j] * 1000 - ms); if (dd < best) { best = dd; ci = j; } }
       code = d.code ? d.code[ci] : null;
@@ -190,7 +206,8 @@
       return '<div class="h">' + esc(o.fmtDay(ms)) + ' ' + esc(o.fmtTime(ms)) + '</div>' +
         '<div class="c">' + o.icon(code, night) + ' ' + esc(o.desc(code)) + ' · ' + rainLine + '</div>' +
         '<div class="g"><div><div class="k">Wind</div><b>' + Math.round(kt) + ' kt</b><br>' + Math.round(kmh(kt)) + ' km/h<br>' + compass(dir) +
-        (gu != null ? '<br><span class="m">gusts ' + Math.round(gu) + ' kt</span>' : '') + '</div>' +
+        (gu != null ? '<br><span class="m">gusts ' + Math.round(gu) + ' kt</span>' : '') +
+        (mlo != null && mhi != null ? '<br><span class="m">models ' + Math.round(mlo) + '–' + Math.round(mhi) + ' kt</span>' : '') + '</div>' +
         (wv != null ? '<div><div class="k">Waves</div><b>' + (Math.round(wv * 10) / 10).toFixed(1) + ' m</b><br>' + ftIn(wv) + (per != null ? '<br>' + Math.round(per) + ' s ' + compass(wd) : '') + '</div>' : '') +
         '</div>';
     } });
@@ -251,7 +268,9 @@
     }
     g += arrows;
     if (o.now >= t0 && o.now <= t1) g += '<line x1="' + X(o.now).toFixed(1) + '" y1="' + top + '" x2="' + X(o.now).toFixed(1) + '" y2="' + (H - bottom) + '" stroke="var(--accent2)" stroke-width="1.6" stroke-dasharray="4 3"/>';
-    wrap.innerHTML = '<svg class="chart wchart" viewBox="0 0 ' + W + ' ' + H + '" style="height:' + H + 'px">' + g + '</svg>';
+    var label = 'Swell forecast for the next ' + o.hours + ' hours. Total sea up to ' + (Math.round(maxWave * 10) / 10).toFixed(1) + ' metres' +
+      (maxPer ? ', swell period up to ' + Math.round(maxPer) + ' seconds' : '') + (o.limit != null ? '. Your limit is ' + o.limit.toFixed(1) + ' metres' : '') + '. Touch and drag for each hour.';
+    wrap.innerHTML = '<svg class="chart wchart" viewBox="0 0 ' + W + ' ' + H + '" style="height:' + H + 'px" role="img" aria-label="' + esc(label) + '">' + g + '</svg>';
     bindScrub(wrap, wrap.querySelector('svg'), { x0: x0, x1: x1, t0: t0, t1: t1, width: W, onTip: function (ms) {
       var wv = sample(d.time, d.wave, ms); if (wv == null) return null;
       var sw = d.swell ? sample(d.time, d.swell, ms) : null, per = d.swellPeriod ? sample(d.time, d.swellPeriod, ms) : null;
@@ -300,6 +319,18 @@
       line += (started ? 'L' : 'M') + xx.toFixed(1) + ' ' + Y(Math.min(r[1], ktMax)).toFixed(1) + ' '; started = true; prevT = ms;
     });
     g += '<path d="' + line + '" fill="none" stroke="var(--t-ink-12)" stroke-width="1"/>';
+    /* what the model said this station's hours would be: a dashed line, so a
+       forecast that has been running light or heavy is obvious at a glance */
+    var fc = o.forecast;
+    if (fc && fc.time && fc.wind) {
+      var fp = '', fs = false;
+      for (var ft = Math.ceil(t0 / (30 * 60000)) * 30 * 60000; ft <= t1; ft += 30 * 60000) {
+        var fv = sample(fc.time, fc.wind, ft);
+        if (fv == null || ft < fc.time[0] * 1000 || ft > fc.time[fc.time.length - 1] * 1000) { fs = false; continue; }
+        fp += (fs ? 'L' : 'M') + X(ft).toFixed(1) + ' ' + Y(Math.min(fv, ktMax)).toFixed(1) + ' '; fs = true;
+      }
+      if (fp) g += '<path d="' + fp + '" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5 4" opacity=".85"/>';
+    }
     /* thin arrows down to size when there are many readings (10-minute stations) */
     var n = pts.length, size = n > 60 ? 9 : n > 36 ? 11 : 13;
     var gusts = '', avgs = '';
@@ -310,16 +341,21 @@
     });
     g += gusts + avgs;
     g += '<line x1="' + X(t1).toFixed(1) + '" y1="' + top + '" x2="' + X(t1).toFixed(1) + '" y2="' + (H - bottom) + '" stroke="#e0362c" stroke-width="1.2"/>';
-    wrap.innerHTML = '<svg class="chart wchart" viewBox="0 0 ' + W + ' ' + H + '" style="height:' + H + 'px">' + g + '</svg>';
+    var last = pts[pts.length - 1];
+    var label = (o.name ? o.name + ' ' : '') + 'live wind over the last ' + o.hours + ' hours. Latest ' + Math.round(last[1]) + ' knots from the ' + compass(last[3]) +
+      (last[2] != null ? ', gusting ' + Math.round(last[2]) : '') + (fc ? '. Dashed line is what the forecast said' : '') + '. Touch and drag for each reading.';
+    wrap.innerHTML = '<svg class="chart wchart" viewBox="0 0 ' + W + ' ' + H + '" style="height:' + H + 'px" role="img" aria-label="' + esc(label) + '">' + g + '</svg>';
     bindScrub(wrap, wrap.querySelector('svg'), { x0: x0, x1: x1, t0: t0, t1: t1, width: W, onTip: function (ms) {
       var best = null, bd = 1e18;
       pts.forEach(function (r) { var dd = Math.abs(r[0] * 1000 - ms); if (dd < bd) { bd = dd; best = r; } });
       if (!best || bd > 45 * 60000) return null;
       var tm = best[0] * 1000;
+      var fv = fc && fc.time ? sample(fc.time, fc.wind, tm) : null;
       return '<div class="h">' + esc(o.fmtDay(tm)) + ' ' + esc(o.fmtTime(tm)) + '</div>' +
         '<div class="g"><div><div class="k">Average</div><b>' + Math.round(best[1]) + ' kt</b><br>' + Math.round(kmh(best[1])) + ' km/h<br>' + compass(best[3]) + '</div>' +
         '<div><div class="k">Gust</div><b>' + (best[2] != null ? Math.round(best[2]) + ' kt' : '—') + '</b><br>' + (best[2] != null ? Math.round(kmh(best[2])) + ' km/h' : '') + '<br>' + compass(best[3]) + '</div></div>' +
-        ((best[4] != null || best[5] != null) ? '<div class="c">' + (best[4] != null ? best[4] + '°' : '') + (best[5] != null ? ' · ' + best[5] + ' hPa' : '') + '</div>' : '');
+        ((best[4] != null || best[5] != null || fv != null) ? '<div class="c">' + (best[4] != null ? best[4] + '°' : '') + (best[5] != null ? ' · ' + best[5] + ' hPa' : '') +
+          (fv != null ? ((best[4] != null || best[5] != null) ? ' · ' : '') + 'forecast said ' + Math.round(fv) + ' kt' : '') + '</div>' : '');
     } });
   }
 

@@ -7,13 +7,154 @@
 
   /* ==================== storage ======================================== */
 
+  var CACHE_PREFIX = 'nf.cache.';
+  var CACHE_BUDGET = 2500000;          // bytes of forecast cache we keep in localStorage
+  var CACHE_MAX_AGE = 7 * 86400000;    // anything older is never worth serving
+
   var Store = {
     _get: function (k, d) {
       try { var v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); }
       catch (e) { return d; }
     },
+    /* A full localStorage used to fail silently here, which meant the catch
+       log could stop saving once enough forecasts had been cached. Now a
+       failed write prunes the cache and tries once more, and every write of
+       his own data is mirrored to IndexedDB. */
     _set: function (k, v) {
-      try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; }
+      var s = JSON.stringify(v), ok = false;
+      try { localStorage.setItem(k, s); ok = true; } catch (e) {
+        Store.pruneCache(k.indexOf(CACHE_PREFIX) === 0 ? CACHE_BUDGET / 2 : 0);
+        try { localStorage.setItem(k, s); ok = true; } catch (e2) { ok = false; }
+      }
+      if (k.indexOf(CACHE_PREFIX) !== 0) Store._scheduleMirror();
+      return ok;
+    },
+    /* Drop cached downloads oldest-first until the cache fits `budget` bytes,
+       and anything past its use-by date regardless. */
+    pruneCache: function (budget) {
+      try {
+        var items = [], total = 0, now = Date.now();
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i); if (!k || k.indexOf(CACHE_PREFIX) !== 0) continue;
+          var raw = localStorage.getItem(k) || '', t = 0;
+          var m = /"t":(\d{10,})/.exec(raw); if (m) t = +m[1];
+          items.push({ k: k, t: t, n: raw.length * 2 }); total += raw.length * 2;
+        }
+        items.sort(function (a, b) { return a.t - b.t; });
+        var dropped = 0;
+        for (var j = 0; j < items.length; j++) {
+          var it = items[j];
+          if (total <= (budget == null ? CACHE_BUDGET : budget) && now - it.t < CACHE_MAX_AGE) continue;
+          localStorage.removeItem(it.k); total -= it.n; dropped++;
+        }
+        return dropped;
+      } catch (e) { return 0; }
+    },
+    /* ---- IndexedDB mirror of everything that is his (never the cache) ---- */
+    userKeys: function () {
+      var keys = [];
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (k && k.indexOf('nf.') === 0 && k.indexOf(CACHE_PREFIX) !== 0) keys.push(k);
+        }
+      } catch (e) {}
+      return keys;
+    },
+    snapshot: function () {
+      var out = {};
+      Store.userKeys().forEach(function (k) { try { out[k] = localStorage.getItem(k); } catch (e) {} });
+      return out;
+    },
+    _idb: function () {
+      if (Store._idbP) return Store._idbP;
+      Store._idbP = new Promise(function (resolve, reject) {
+        try {
+          if (typeof indexedDB === 'undefined') { reject(new Error('no idb')); return; }
+          var req = indexedDB.open('dffp', 1);
+          req.onupgradeneeded = function () { req.result.createObjectStore('kv'); };
+          req.onsuccess = function () { resolve(req.result); };
+          req.onerror = function () { reject(req.error); };
+          req.onblocked = function () { reject(new Error('blocked')); };
+        } catch (e) { reject(e); }
+      });
+      Store._idbP.catch(function () { Store._idbP = null; });
+      return Store._idbP;
+    },
+    _idbPut: function (key, value) {
+      return Store._idb().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(value, key);
+          tx.oncomplete = function () { resolve(true); };
+          tx.onerror = function () { reject(tx.error); };
+          tx.onabort = function () { reject(tx.error); };
+        });
+      });
+    },
+    _idbGet: function (key) {
+      return Store._idb().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction('kv', 'readonly'), rq = tx.objectStore('kv').get(key);
+          rq.onsuccess = function () { resolve(rq.result); };
+          rq.onerror = function () { reject(rq.error); };
+        });
+      });
+    },
+    _scheduleMirror: function () {
+      clearTimeout(Store._mirrorT);
+      Store._mirrorT = setTimeout(function () { Store.mirror(); }, 800);
+    },
+    mirror: function () {
+      var snap = Store.snapshot();
+      if (!Object.keys(snap).length) return Promise.resolve(false);
+      return Store._idbPut('user', { t: Date.now(), data: snap }).then(function () { Store.mirroredAt = Date.now(); return true; })
+        .catch(function () { return false; });
+    },
+    /* On boot: if localStorage came up empty but the mirror has his data
+       (Safari cleared site data, or a storage error), put it back. Resolves
+       true when something was restored. */
+    restore: function () {
+      var have = false;
+      try { have = localStorage.getItem('nf.settings') != null || localStorage.getItem('nf.log') != null; } catch (e) {}
+      if (have) return Promise.resolve(false);
+      return Store._idbGet('user').then(function (m) {
+        if (!m || !m.data || !m.data['nf.settings']) return false;
+        var n = 0;
+        for (var k in m.data) { try { localStorage.setItem(k, m.data[k]); n++; } catch (e) {} }
+        return n > 0;
+      }).catch(function () { return false; });
+    },
+    /* Ask the browser not to evict our data under storage pressure. */
+    persist: function () {
+      try {
+        if (navigator.storage && navigator.storage.persist) {
+          return navigator.storage.persist().then(function (ok) { Store.persisted = ok; return ok; }).catch(function () { return null; });
+        }
+      } catch (e) {}
+      return Promise.resolve(null);
+    },
+    persistStatus: function () {
+      try {
+        if (!navigator.storage) return Promise.resolve({ persisted: null, usage: null, quota: null });
+        var ps = navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(null);
+        var es = navigator.storage.estimate ? navigator.storage.estimate() : Promise.resolve({});
+        return Promise.all([ps, es]).then(function (r) {
+          return { persisted: r[0], usage: r[1] && r[1].usage != null ? r[1].usage : null, quota: r[1] && r[1].quota != null ? r[1].quota : null };
+        }).catch(function () { return { persisted: null, usage: null, quota: null }; });
+      } catch (e) { return Promise.resolve({ persisted: null, usage: null, quota: null }); }
+    },
+    /* Bytes of his own data and of the cache, for the diagnostics page. */
+    sizes: function () {
+      var user = 0, cache = 0;
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i); if (!k || k.indexOf('nf.') !== 0) continue;
+          var n = (localStorage.getItem(k) || '').length * 2;
+          if (k.indexOf(CACHE_PREFIX) === 0) cache += n; else user += n;
+        }
+      } catch (e) {}
+      return { user: user, cache: cache };
     },
     settings: function () {
       var s = Store._get('nf.settings', null) || {};
@@ -71,7 +212,7 @@
     note: function (id) { return Store._get('nf.note.' + id, ''); },
     setNote: function (id, text) {
       if (text) Store._set('nf.note.' + id, text);
-      else { try { localStorage.removeItem('nf.note.' + id); } catch (e) {} }
+      else { try { localStorage.removeItem('nf.note.' + id); } catch (e) {} Store._scheduleMirror(); }
     },
     /* places he added himself by searching (ids from 1000 up) */
     customs: function () { return Store._get('nf.custom', []); },
@@ -83,12 +224,15 @@
     removeCustom: function (id) {
       Store._set('nf.custom', Store.customs().filter(function (x) { return x.id !== id; }));
     },
+    /* Resolves once the mirror is gone too, so a reload cannot restore it. */
     wipe: function () {
+      clearTimeout(Store._mirrorT);
       try {
         var keys = [];
         for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('nf.') === 0) keys.push(k); }
         keys.forEach(function (k) { localStorage.removeItem(k); });
       } catch (e) {}
+      return Store._idbPut('user', null).catch(function () { return false; });
     }
   };
 
@@ -271,6 +415,68 @@
       return cachedJson(key, base + '&models=bom_access_global_ensemble', 120).catch(function () {
         return cachedJson(key + '.ec', base + '&models=ecmwf_ifs025', 120);
       });
+    },
+
+    /* Three independent models side by side (BOM ACCESS-G, ECMWF, GFS) so the
+       chart can show where they disagree. Wind only — it is the one that
+       decides whether he goes. Open-Meteo suffixes each variable with the
+       model name when more than one is asked for. */
+    models: function (lat, lon) {
+      var base = OM + '?latitude=' + round4(lat) + '&longitude=' + round4(lon) +
+        '&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m' +
+        '&timezone=' + encodeURIComponent(TZ) + '&timeformat=unixtime&wind_speed_unit=kn&forecast_days=7';
+      var key = 'mm.' + round4(lat) + ',' + round4(lon);
+      return cachedJson(key, base + '&models=bom_access_global,ecmwf_ifs025,gfs_seamless', 60).catch(function () {
+        return cachedJson(key + '.2', base + '&models=ecmwf_ifs025,gfs_seamless', 60);
+      });
+    }
+  };
+
+  /* ==================== model agreement ================================= */
+
+  var MODEL_NAMES = { bom_access_global: 'ACCESS-G', ecmwf_ifs025: 'ECMWF', gfs_seamless: 'GFS', gfs_global: 'GFS' };
+
+  var Models = {
+    /* Per-hour low/high/sd of wind across the models that answered. */
+    spread: function (mm) {
+      if (!mm || !mm.hourly || !mm.hourly.time) return null;
+      var H = mm.hourly, keys = [], names = [];
+      for (var k in H) {
+        var m = /^wind_speed_10m(?:_(.+))?$/.exec(k);
+        if (!m) continue;
+        /* a model that answered with nothing is not a second opinion */
+        var any = false; for (var q = 0; q < H[k].length; q++) if (H[k][q] != null) { any = true; break; }
+        if (!any) continue;
+        keys.push(k); names.push(MODEL_NAMES[m[1]] || m[1] || 'model');
+      }
+      if (keys.length < 2) return null;
+      var T = H.time, lo = [], hi = [], sd = [];
+      for (var i = 0; i < T.length; i++) {
+        var n = 0, sum = 0, sq = 0, a = Infinity, b = -Infinity;
+        for (var j = 0; j < keys.length; j++) {
+          var v = H[keys[j]][i]; if (v == null) continue;
+          n++; sum += v; sq += v * v; if (v < a) a = v; if (v > b) b = v;
+        }
+        if (n < 2) { lo.push(null); hi.push(null); sd.push(null); continue; }
+        lo.push(a); hi.push(b); sd.push(Math.sqrt(Math.max(0, sq / n - (sum / n) * (sum / n))));
+      }
+      return { time: T, lo: lo, hi: hi, sd: sd, n: keys.length, names: names };
+    },
+    /* Mean spread (hi − lo, knots) over a window; null if nothing there. */
+    range: function (sp, fromMs, toMs) {
+      if (!sp) return null;
+      var n = 0, s = 0;
+      for (var i = 0; i < sp.time.length; i++) {
+        var ts = sp.time[i] * 1000; if (ts < fromMs || ts >= toMs || sp.lo[i] == null) continue;
+        n++; s += sp.hi[i] - sp.lo[i];
+      }
+      return n ? s / n : null;
+    },
+    label: function (rangeKt) {
+      if (rangeKt == null) return null;
+      if (rangeKt < 4) return { text: 'Models agree', tone: 'great' };
+      if (rangeKt < 8) return { text: 'Models mostly agree', tone: 'ok' };
+      return { text: 'Models disagree', tone: 'bad' };
     }
   };
 
@@ -328,6 +534,34 @@
       }
       d.modelWind = mw; d.modelPressure = mp; d.modelTemp = mt;
       return d;
+    },
+
+    /* How the model did against a station over the last `hours`: mean error
+       (station minus model, so +3 means the model ran 3 kt light) and mean
+       absolute error. Uses the untouched model wind, never the nudged copy.
+       rows are the history.json rows [[unix s, kt, gustKt, dir, temp, press]]. */
+    compare: function (wx, rows, hours) {
+      if (!wx || !wx.hourly || !rows || rows.length < 3) return null;
+      var T = wx.hourly.time, W = (wx._raw && wx._raw.wind_speed_10m) || wx.hourly.wind_speed_10m;
+      if (!T || !W) return null;
+      var now = Date.now(), from = now - (hours || 12) * HOUR, n = 0, sum = 0, abs = 0;
+      var first = T[0] * 1000, last = T[T.length - 1] * 1000;
+      for (var i = 0; i < rows.length; i++) {
+        var ms = rows[i][0] * 1000, obs = rows[i][1];
+        if (ms < from || ms > now || obs == null || ms < first || ms > last) continue;
+        var f = sampleSeries(T, W, ms); if (f == null) continue;
+        n++; sum += obs - f; abs += Math.abs(obs - f);
+      }
+      if (n < 3) return null;
+      return { n: n, bias: sum / n, mae: abs / n, hours: hours || 12 };
+    },
+    /* One line he can act on. */
+    compareText: function (c, stationName) {
+      if (!c) return null;
+      var b = Math.round(c.bias), who = stationName || 'the station';
+      if (Math.abs(c.bias) < 2 && c.mae < 3.5) return 'Forecast matched ' + who + ' over the last ' + c.hours + ' h (within ' + Math.round(c.mae) + ' kt).';
+      if (Math.abs(c.bias) < 2) return 'Forecast was in and out against ' + who + ' — off by about ' + Math.round(c.mae) + ' kt either way.';
+      return 'Forecast ran about ' + Math.abs(b) + ' kt ' + (b > 0 ? 'light' : 'heavy') + ' against ' + who + ' over the last ' + c.hours + ' h.';
     }
   };
 
@@ -863,7 +1097,7 @@
   };
 
   global.Core = {
-    TZ: TZ, Store: Store, Api: Api, Tides: Tides, Score: Score, Obs: Obs, Ensemble: Ensemble,
+    TZ: TZ, Store: Store, Api: Api, Tides: Tides, Score: Score, Obs: Obs, Ensemble: Ensemble, Models: Models,
     haversine: haversine, coverage: coverage,
     sampleSeries: sampleSeries, sampleNearest: sampleNearest,
     degToCompass: degToCompass, clamp: clamp, exposure: exposure
