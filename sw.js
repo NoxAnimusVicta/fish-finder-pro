@@ -1,5 +1,5 @@
 /* Offline shell. Bump CACHE when you change any file below. */
-const CACHE = 'dffp-v21';
+const CACHE = 'dffp-v22';
 const SHELL = [
   './',
   './index.html',
@@ -9,7 +9,6 @@ const SHELL = [
   './js/data.js',
   './js/core.js',
   './js/map.js',
-  './js/overlay.js',
   './js/wind.js',
   './js/app.js',
   './icons/icon-180.png',
