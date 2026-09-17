@@ -219,7 +219,7 @@
     if (!el('v-maps').classList.contains('on')) return;
     initRadar();
     if (S.mapMode === 'wind') setWindy('windyFrame', 'wind');
-    if (S.mapMode === 'waves') setWindy('waveFrame', 'waves');
+    if (S.mapMode === 'waves') setWindy('waveFrame', waveOverlay());
   }
   function posKey() { return S.lat.toFixed(2) + ',' + S.lon.toFixed(2); }
 
@@ -1328,7 +1328,7 @@
       el('windPane').style.display = S.mapMode === 'wind' ? '' : 'none';
       el('wavePane').style.display = S.mapMode === 'waves' ? '' : 'none';
       if (S.mapMode === 'wind') setWindy('windyFrame', 'wind');
-      if (S.mapMode === 'waves') setWindy('waveFrame', 'waves');
+      if (S.mapMode === 'waves') setWindy('waveFrame', waveOverlay());
       if (S.mapMode === 'radar' && S.map) S.map.render();
     });
     el('baseSeg').addEventListener('click', function (e) {
@@ -1336,6 +1336,11 @@
       Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); });
       S.base = b.dataset.b;
       buildMapLayers();
+    });
+    el('waveSeg').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-wo]'); if (!b) return;
+      Array.prototype.forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); });
+      S.waveOverlay = b.dataset.wo; setWindy('waveFrame', waveOverlay());
     });
     el('radarSrc').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-rs]'); if (!b) return;
@@ -1353,15 +1358,21 @@
       .map(function (c) { return '<i style="background:' + c + '"></i>'; }).join('');
   }
 
+  /* Windy only draws a wave overlay when the wave model is selected too —
+     without product=ecmwfWaves the embed quietly falls back to wind. */
+  var WINDY_PRODUCT = { wind: 'ecmwf', gust: 'ecmwf', waves: 'ecmwfWaves', swell1: 'ecmwfWaves', swell2: 'ecmwfWaves', wwaves: 'ecmwfWaves' };
   function setWindy(id, overlay) {
     var f = el(id);
     var lat = S.lat.toFixed(3), lon = S.lon.toFixed(3);
-    var u = 'https://embed.windy.com/embed2.html?lat=' + lat + '&lon=' + lon +
-      '&detailLat=' + lat + '&detailLon=' + lon + '&zoom=8&level=surface&overlay=' + overlay +
-      '&menu=&message=&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=' +
-      '&metricWind=kt&metricTemp=%C2%B0C&radarRange=-1';
+    /* the current embed.html endpoint — the older embed2.html quietly ignores
+       the wave product and shows wind whatever you ask for */
+    var u = 'https://embed.windy.com/embed.html?type=map&location=coordinates&metricRain=mm&metricTemp=%C2%B0C' +
+      '&metricWind=' + (S.settings.unitsWind === 'kmh' ? 'km%2Fh' : 'kt') + '&zoom=8&overlay=' + overlay +
+      '&product=' + (WINDY_PRODUCT[overlay] || 'ecmwf') + '&level=surface&lat=' + lat + '&lon=' + lon +
+      '&detailLat=' + lat + '&detailLon=' + lon + '&marker=true&message=true';
     if (f.getAttribute('data-src') !== u) { f.setAttribute('data-src', u); f.src = u; }
   }
+  function waveOverlay() { return S.waveOverlay || 'waves'; }
 
   function showRadarSource() {
     var haveBom = !!(S.liveRadar && S.liveRadar.radars && Object.keys(S.liveRadar.radars).length);
