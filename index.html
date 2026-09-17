@@ -250,8 +250,13 @@
       <div class="mapattr">Animated wind and rain layers by Windy.com.</div>
     </div>
     <div class="card" id="wavePane" style="display:none">
+      <div class="seg" id="waveSeg" style="margin-bottom:10px">
+        <button data-wo="waves" class="on">Total waves</button>
+        <button data-wo="swell1">Primary swell</button>
+        <button data-wo="wwaves">Wind chop</button>
+      </div>
       <iframe class="windy" id="waveFrame" title="Swell map" loading="lazy" referrerpolicy="no-referrer"></iframe>
-      <div class="mapattr">Wave and swell layers by Windy.com.</div>
+      <div class="mapattr">ECMWF wave model layers by Windy.com. Height in metres, arrows show direction and period.</div>
     </div>
     <div class="card">
       <h2>Straight to BOM</h2>
