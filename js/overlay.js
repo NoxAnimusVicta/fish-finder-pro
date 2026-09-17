@@ -422,7 +422,7 @@
       : stops.map(function (v) { return v; });
     return '<div class="ovbar" style="background:linear-gradient(90deg,' + grad + ')"></div><div class="ovticks">' +
       labels.map(function (l) { return '<span>' + l + '</span>'; }).join('') + '</div>' +
-      '<div class="muted" style="font-size:11px">' + (kind === 'wind' ? (unit === 'kmh' ? 'km/h' : 'knots') + ' at 10 m · arrows point where the wind is going · particles drift with it' : 'metres · arrows point where the swell is heading, coloured by period (light &lt;8 s, mid 8–11 s, dark 12 s+)') + '</div>';
+      '<div class="muted" style="font-size:11px">' + (kind === 'wind' ? (unit === 'kmh' ? 'km/h' : 'knots') + ' at 10 m · arrows point where the wind is going · particles drift with it' : 'metres · arrows point where the swell is heading, coloured by period (light &lt;8 s, mid 8–11 s, dark 12 s+) · inside bays and estuaries it will be smaller than shown') + '</div>';
   };
 
   global.WxOverlay = { Overlay: Overlay, legend: Overlay.legend, decodeCoast: decodeCoast, gridSpec: gridSpec, fetchGrid: fetchGrid, sampleScalar: sampleScalar, sampleDir: sampleDir, WIND_RAMP: WIND_RAMP, WAVE_RAMP: WAVE_RAMP };

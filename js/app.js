@@ -88,7 +88,7 @@
     document.documentElement.classList.toggle('big', S.settings.textSize === 'large');
   }
 
-  var APP_VERSION = 'v20';
+  var APP_VERSION = 'v21';
 
   /* Last twenty errors, kept on the phone for the Diagnostics page. */
   function diagLog(kind, msg, where) {
@@ -2268,8 +2268,8 @@
   function renderAbout() {
     var R = D.RULES;
     el('about').innerHTML =
-      '<p><b>Where the numbers come from.</b> Forecast from the Bureau of Meteorology ACCESS-G model (or a multi-model blend if you switch it), with ECMWF and GFS alongside for the model-spread band, all served through Open-Meteo. Swell, sea state and water temperature from Open-Meteo Marine. Rain radar straight from BOM, with RainViewer as the map view. Wind and swell maps by Windy. Tides are official BOM predictions when the repository has them, otherwise a global tide model estimate. Live station readings from BOM. Sun, moon and feeding times are calculated on your phone.</p>' +
-      '<p><b>Attribution.</b> <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a> (CC BY 4.0). <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">Weather data by RainViewer</a>. Map layers by <a href="https://www.windy.com/" target="_blank" rel="noopener">Windy.com</a>. Base maps &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>; imagery and nautical tiles &copy; Esri. Fishing rules from NSW DPIRD.</p>' +
+      '<p><b>Where the numbers come from.</b> Forecast from the Bureau of Meteorology ACCESS-G model (or a multi-model blend if you switch it), with ECMWF and GFS alongside for the model-spread band, all served through Open-Meteo. Swell, sea state and water temperature from Open-Meteo Marine. Rain radar straight from BOM, with RainViewer as the map view. The wind and swell maps are drawn by the app itself from a grid of Open-Meteo points; the swell map stops at the coastline from the ABS 2021 boundaries. Base maps from Geoscience Australia and NSW Spatial Services. Tides are official BOM predictions when the repository has them, otherwise a global tide model estimate. Live station readings from BOM. Sun, moon and feeding times are calculated on your phone.</p>' +
+      '<p><b>Attribution.</b> <a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a> (CC BY 4.0). <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">Weather data by RainViewer</a>. Base maps &copy; <a href="https://www.ga.gov.au/" target="_blank" rel="noopener">Geoscience Australia</a> (CC BY 4.0) and &copy; State of New South Wales (<a href="https://www.spatial.nsw.gov.au/" target="_blank" rel="noopener">Spatial Services</a>, CC BY); satellite outside NSW &copy; Esri. Coastline from the <a href="https://www.abs.gov.au/" target="_blank" rel="noopener">Australian Bureau of Statistics</a> ASGS 2021 (CC BY 4.0). Fishing rules from NSW DPIRD.</p>' +
       '<p><b>Bureau of Meteorology.</b> This product is based on Bureau of Meteorology information that has subsequently been modified. The Bureau does not necessarily support or endorse, or have any connection with, the product. Always check the Bureau&rsquo;s own warnings before heading out.</p>' +
       '<p><b>Fishing rules</b> checked against NSW DPIRD, ' + esc(R.asAt) + '. They change — the official tables win. Report illegal fishing on 1800 043 536.</p>' +
       '<p><b>Not for navigation.</b> Tide heights and swell figures are guidance, not depth or safety data. The bite score is an estimate, not a promise. Rock fishing kills people in NSW every year: wear a lifejacket, watch the sea for ten minutes before you climb down, and never fish alone.</p>' +
