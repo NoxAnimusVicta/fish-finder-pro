@@ -61,6 +61,16 @@ the phone, pull-to-refresh, and a larger-text option.
 - **Confidence.** BOM's own 18-member ensemble is pulled alongside the
   forecast. Where the members disagree on the wind, the windows and the
   seven-day list say so.
+- **Model agreement.** ACCESS-G, ECMWF and GFS are fetched side by side; the
+  wind chart shows the spread between them as a grey band, the tooltip gives
+  the range, and each day in the 7-day list carries a "models ±N kt" tag.
+- **Forecast versus what happened.** Every live station chart within 40 km of
+  the spot carries the model's own wind for those hours as a dashed line,
+  with a one-line verdict ("forecast ran about 4 kt light against Ulladulla
+  over the last 12 h") so he knows how much to trust today's numbers.
+- **Why this score.** Every factor is listed by how much it counts, with how
+  far it sits from the usual reading at that spot this week, and one line
+  naming what is doing the most and what is costing the most.
 - **Local exposure.** Every spot knows which way it faces, so a westerly at
   Callala Bay counts as offshore and flattening, while at Currarong it is
   side-shore — the same wind scores differently at spots ten minutes apart.
@@ -77,6 +87,13 @@ the phone, pull-to-refresh, and a larger-text option.
   window builder's constraints, the learning algorithm against a random
   angler and a selective one, and every spot and species entry for
   consistency. `test/run.py` drives the whole UI in a simulated iPhone.
+- **Hard to lose.** Settings, log, notes and custom places live in
+  localStorage and are mirrored to IndexedDB after every change; if the
+  browser ever clears the first, the app restores from the second on the next
+  open. The forecast cache prunes itself so a full store can never stop a
+  catch from saving, and the app asks iOS for persistent storage. Settings →
+  Diagnostics shows versions, feeds, storage and the last twenty errors, and
+  copies them to the share sheet.
 
 ### The bite score
 

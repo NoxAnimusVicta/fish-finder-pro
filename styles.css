@@ -478,3 +478,31 @@ body.loading #heroCard, body.loading #nowGrid { opacity: .55; transition: opacit
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 button.chip { padding: 7px 12px; font-size: 13px; }
 .spotlist button { padding: 12px 12px; }
+
+/* ---- v18: why-this-score rows, diagnostics, bigger touch targets ---- */
+.factor { grid-template-columns: 100px 1fr 34px; }
+.factor .fl { display: grid; line-height: 1.15; min-width: 0; }
+.factor .fl small { font-size: 10px; color: var(--ink3); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.factor .bar { position: relative; overflow: visible; }
+.factor .bar i { position: relative; z-index: 1; }
+.factor .bar em { position: absolute; right: 0; top: -13px; font-style: normal; font-size: 10px; font-weight: 640; line-height: 1; letter-spacing: .01em; }
+.factor .bar em.dp { color: var(--great); }
+.factor .bar em.dn { color: var(--bad); }
+.factor .bar em.d0 { color: var(--ink3); font-weight: 500; }
+.factors { gap: 12px; margin-top: 8px; }
+.diag { display: grid; grid-template-columns: 82px 1fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; line-height: 1.35; }
+.diag b { font-weight: 640; color: var(--ink2); }
+.diag span { color: var(--ink); word-break: break-word; }
+.diag.err span { color: var(--bad); }
+.diag.err i { color: var(--ink3); font-style: normal; }
+.seg button { min-height: 44px; }
+.seg.mini button { min-height: 36px; }
+#kindSeg button { min-height: 40px; }
+.iconbtn { width: 44px; height: 44px; }
+@media (max-width: 360px) { .iconbtn { width: 40px; height: 40px; } }
+.lw .lwh .star { width: 44px; height: 44px; }
+.sheetclose { width: 40px; height: 40px; top: 8px; right: 10px; }
+button.chip { min-height: 36px; }
+.tabbar button { min-height: 50px; }
+.best { min-height: 48px; }
+.tt td button, .linkrow a { min-height: 44px; }

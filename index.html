@@ -60,7 +60,8 @@
       <div class="seg" id="kindSeg" style="display:none;margin-top:12px"></div>
       <div class="muted" id="bestBet" style="margin-top:10px;display:none"></div>
       <div class="sep"></div>
-      <div class="factors" id="factors"></div>
+      <div class="muted" id="whyLine" style="margin-bottom:8px;display:none"></div>
+      <div class="factors" id="factors" role="list" aria-label="What is driving the bite score"></div>
       <div class="muted" id="scoreFoot" style="margin-top:10px"></div>
       <div class="muted" id="statusHint" style="margin-top:4px;color:var(--ok);display:none"></div>
       <div class="row" style="margin-top:12px;gap:8px">
@@ -122,7 +123,7 @@
       </div>
       <div class="wwrap" id="wwChart"></div>
       <div class="legend windkey">
-        <span><i style="background:#35d43a"></i>&lt;10 kt</span><span><i style="background:#ffe11a"></i>10–19</span><span><i style="background:#ff8a1f"></i>20–29</span><span><i style="background:#ff2f2f"></i>30+</span><span><i style="background:var(--t-accent-30)"></i>Wave height</span>
+        <span><i style="background:#35d43a"></i>&lt;10 kt</span><span><i style="background:#ffe11a"></i>10–19</span><span><i style="background:#ff8a1f"></i>20–29</span><span><i style="background:#ff2f2f"></i>30+</span><span><i style="background:var(--t-accent-30)"></i>Wave height</span><span><i style="background:var(--t-ink-12)"></i>Model spread</span>
       </div>
       <div class="muted" id="wwNote" style="margin-top:4px">Arrows point where the wind is going. Touch and drag across the chart for the detail.</div>
     </div>
@@ -418,7 +419,10 @@
         <button class="btn ghost small" id="backupBtn">Back up settings &amp; log</button>
         <button class="btn ghost small" id="restoreBtn">Restore a backup</button>
       </div>
-      <button class="btn ghost small" id="wipeBtn" style="margin-top:10px">Start fresh — wipe settings and log</button>
+      <div class="row" style="margin-top:8px;gap:8px">
+        <button class="btn ghost small" id="diagBtn">Diagnostics</button>
+        <button class="btn ghost small" id="wipeBtn">Start fresh — wipe settings and log</button>
+      </div>
     </div>
   </section>
 </main>
