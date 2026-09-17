@@ -153,6 +153,42 @@
     return (Math.atan2(u, v) * 180 / Math.PI + 360) % 360;
   }
 
+  /* ---------- coastline clip ---------- */
+  /* data/coast.json: rings of milli-degree deltas (see scripts/build_coast.py) */
+  function decodeCoast(doc) {
+    if (!doc || !doc.rings) return null;
+    var sc = doc.scale || 1000, out = [];
+    doc.rings.forEach(function (flat) {
+      var pts = [], x = 0, y = 0, minLon = 999, maxLon = -999, minLat = 999, maxLat = -999;
+      for (var i = 0; i < flat.length; i += 2) {
+        x += flat[i]; y += flat[i + 1];
+        var lon = x / sc, lat = y / sc;
+        pts.push(lon, lat);
+        if (lon < minLon) minLon = lon; if (lon > maxLon) maxLon = lon; if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+      }
+      out.push({ pts: pts, minLon: minLon, maxLon: maxLon, minLat: minLat, maxLat: maxLat });
+    });
+    return out;
+  }
+  /* the whole canvas minus every land ring in view — even-odd, so the sea
+     is what remains */
+  function clipPath(ctx, map, coast, sz) {
+    var b = map.bounds();
+    ctx.beginPath();
+    ctx.rect(-4, -4, sz.w + 8, sz.h + 8);
+    for (var r = 0; r < coast.length; r++) {
+      var ring = coast[r];
+      if (ring.maxLon < b.west || ring.minLon > b.east || ring.maxLat < b.south || ring.minLat > b.north) continue;
+      var p = ring.pts;
+      for (var i = 0; i < p.length; i += 2) {
+        var q = map.project(p[i + 1], p[i]);
+        if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y);
+      }
+      ctx.closePath();
+    }
+    ctx.clip('evenodd');
+  }
+
   /* ---------- the overlay ---------- */
   function Overlay(map, opts) {
     this.map = map; this.kind = opts.kind;           // 'wind' | 'swell'
@@ -165,6 +201,7 @@
     this.reduced = false;
     try { this.reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
     this.grid = null; this.t = 0; this.loading = false; this.playing = false;
+    this.coast = opts.coast || null;             // land rings; the swell layer stops at the shore
     this.field = map.addCanvas('mm-field');
     this.parts = map.addCanvas('mm-particles');
     this.particles = [];
@@ -181,6 +218,8 @@
   }
 
   Overlay.prototype.setVisible = function (fn) { this._visible = fn; };
+  Overlay.prototype.setCoast = function (rings) { this.coast = rings; this.redraw(); this.resetParticles(); };
+  Overlay.prototype.clips = function () { return !!(this.coast && this.kind === 'swell'); };
 
   Overlay.prototype.ensureGrid = function () {
     var self = this, map = this.map;
@@ -254,14 +293,15 @@
   };
 
   Overlay.prototype._size = function () {
-    var s = this.map.size(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    var s = this.map.size(), dpr = Math.min(2, window.devicePixelRatio || 1), resized = false;
     [this.field, this.parts].forEach(function (c) {
       if (c.width !== Math.round(s.w * dpr) || c.height !== Math.round(s.h * dpr)) {
         c.width = Math.round(s.w * dpr); c.height = Math.round(s.h * dpr);
-        c.style.width = s.w + 'px'; c.style.height = s.h + 'px';
+        c.style.width = s.w + 'px'; c.style.height = s.h + 'px'; resized = true;
       }
     });
-    return { w: s.w, h: s.h, dpr: dpr };
+    if (resized) this._partsClipped = false;
+    return { w: s.w, h: s.h, dpr: dpr, resized: resized };
   };
 
   Overlay.prototype.redraw = function () {
@@ -269,7 +309,14 @@
     ctx.setTransform(sz.dpr, 0, 0, sz.dpr, 0, 0);
     ctx.clearRect(0, 0, sz.w, sz.h);
     if (!g) return;
-    var F = this.fields(), t = this.t, map = this.map, self = this;
+    ctx.save();
+    if (this.clips()) clipPath(ctx, this.map, this.coast, sz);
+    this._paint(ctx, sz);
+    ctx.restore();
+  };
+
+  Overlay.prototype._paint = function (ctx, sz) {
+    var g = this.grid, F = this.fields(), t = this.t, map = this.map, self = this;
     /* colour field: sampled every 4 px into a small image, then scaled up
        with smoothing so it reads as a continuous wash */
     var cell = 4, cw = Math.ceil(sz.w / cell), ch = Math.ceil(sz.h / cell);
@@ -314,7 +361,10 @@
     var sz = this._size(), n = this.reduced ? 0 : Math.round(sz.w * sz.h / 700);
     this.particles = [];
     for (var i = 0; i < n; i++) this.particles.push({ x: Math.random() * sz.w, y: Math.random() * sz.h, age: Math.random() * 80 | 0 });
-    var ctx = this.parts.getContext('2d'); ctx.setTransform(sz.dpr, 0, 0, sz.dpr, 0, 0); ctx.clearRect(0, 0, sz.w, sz.h);
+    var ctx = this.parts.getContext('2d');
+    if (this._partsClipped) { ctx.restore(); this._partsClipped = false; }
+    ctx.setTransform(sz.dpr, 0, 0, sz.dpr, 0, 0); ctx.clearRect(0, 0, sz.w, sz.h);
+    if (this.clips()) { ctx.save(); clipPath(ctx, this.map, this.coast, sz); this._partsClipped = true; }
   };
 
   Overlay.prototype.animate = function () {
@@ -375,5 +425,5 @@
       '<div class="muted" style="font-size:11px">' + (kind === 'wind' ? (unit === 'kmh' ? 'km/h' : 'knots') + ' at 10 m · arrows point where the wind is going · particles drift with it' : 'metres · arrows point where the swell is heading, coloured by period (light &lt;8 s, mid 8–11 s, dark 12 s+)') + '</div>';
   };
 
-  global.WxOverlay = { Overlay: Overlay, legend: Overlay.legend, gridSpec: gridSpec, fetchGrid: fetchGrid, sampleScalar: sampleScalar, sampleDir: sampleDir, WIND_RAMP: WIND_RAMP, WAVE_RAMP: WAVE_RAMP };
+  global.WxOverlay = { Overlay: Overlay, legend: Overlay.legend, decodeCoast: decodeCoast, gridSpec: gridSpec, fetchGrid: fetchGrid, sampleScalar: sampleScalar, sampleDir: sampleDir, WIND_RAMP: WIND_RAMP, WAVE_RAMP: WAVE_RAMP };
 })(typeof window !== 'undefined' ? window : globalThis);

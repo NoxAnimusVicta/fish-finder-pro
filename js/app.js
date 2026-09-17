@@ -88,7 +88,7 @@
     document.documentElement.classList.toggle('big', S.settings.textSize === 'large');
   }
 
-  var APP_VERSION = 'v19';
+  var APP_VERSION = 'v20';
 
   /* Last twenty errors, kept on the phone for the Diagnostics page. */
   function diagLog(kind, msg, where) {
@@ -158,6 +158,13 @@
       else { computeScores(); renderNow(); }
     });
     renderRuleLinks(); renderAbout(); installHint();
+    /* the land outline the swell map clips to; static, built by the coast workflow */
+    if (typeof WxOverlay !== 'undefined') {
+      C.Api.local('coast.json').then(function (j) {
+        S.coast = WxOverlay.decodeCoast(j);
+        if (S.coast && S.ov.swell) S.ov.swell.ov.setCoast(S.coast);
+      }).catch(function () {});
+    }
     setSpot(S.settings.spot, true);
     var lastTab = C.Store._get('nf.tab', 'now');
     if (lastTab && lastTab !== 'now' && lastTab !== 'me') setTimeout(function () { showView(lastTab); }, 0);
@@ -1484,7 +1491,7 @@
       applyBase(map, ids.attr, kind);
       var pop = document.createElement('div'); pop.className = 'ovpop'; pop.style.display = 'none'; el(ids.map).appendChild(pop);
       var ov = new WxOverlay.Overlay(map, {
-        kind: kind, mode: kind === 'swell' ? waveOverlay() : 'wind', unit: S.settings.unitsWind,
+        kind: kind, mode: kind === 'swell' ? waveOverlay() : 'wind', unit: S.settings.unitsWind, coast: kind === 'swell' ? S.coast : null,
         fmtTime: function (ms) { return t(ms); }, fmtDay: function (ms) { return relDay(ms); },
         onstatus: function (st, err) {
           var tl = el(ids.time);
